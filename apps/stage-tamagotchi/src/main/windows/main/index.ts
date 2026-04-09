@@ -104,15 +104,15 @@ export async function setupMainWindow(params: {
     allowClose = true
   })
 
-  // NOTICE: in development mode, open devtools by default
-  if (is.dev || env.MAIN_APP_DEBUG || env.APP_DEBUG) {
-    try {
-      window.webContents.openDevTools({ mode: 'detach' })
-    }
-    catch (err) {
-      console.error('failed to open devtools:', err)
-    }
-  }
+  // // NOTICE: in development mode, open devtools by default
+  // if (is.dev || env.MAIN_APP_DEBUG || env.APP_DEBUG) {
+  //   try {
+  //     window.webContents.openDevTools({ mode: 'detach' })
+  //   }
+  //   catch (err) {
+  //     console.error('failed to open devtools:', err)
+  //   }
+  // }
 
   function handleNewBounds(newBounds: Rectangle) {
     const config = getConfig()
