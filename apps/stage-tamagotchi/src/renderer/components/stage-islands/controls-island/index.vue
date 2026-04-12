@@ -25,6 +25,14 @@ import {
   electronWindowSetAlwaysOnTop,
 } from '../../../../shared/eventa'
 
+interface Props {
+  visible?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  visible: true,
+})
+
 const { isDark, toggleDark } = useTheme()
 const { t } = useI18n()
 
@@ -47,7 +55,12 @@ const blockingOverlays = reactive(new Set<string>())
 const isBlocked = computed(() => blockingOverlays.size > 0)
 
 function setOverlay(key: string, active: boolean) {
-  active ? blockingOverlays.add(key) : blockingOverlays.delete(key)
+  if (active) {
+    blockingOverlays.add(key)
+    return
+  }
+
+  blockingOverlays.delete(key)
 }
 
 // Expose for parent (e.g. to disable click-through when a dialog is open)
@@ -126,7 +139,14 @@ function refreshWindow() {
 </script>
 
 <template>
-  <div ref="islandRef" fixed bottom-2 right-2>
+  <div
+    ref="islandRef"
+    :class="[
+      'fixed bottom-2 right-2',
+      'transition-opacity duration-200 ease-out',
+      props.visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+    ]"
+  >
     <div flex flex-col items-end gap-1>
       <!-- iOS Style Drawer Panel -->
       <Transition
