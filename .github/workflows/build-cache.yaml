@@ -26,7 +26,7 @@ jobs:
       - name: Build Flake
         # Replace '.#your-package' with the specific output or just '.' for default
         run: |
-          nix build .#default --print-build-logs
+          nix build .#airi --print-build-logs
 
       - name: Push to Attic
         # 'my-cache' is the name of your specific cache on the Attic server
