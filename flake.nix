@@ -60,6 +60,9 @@
                 p: with p; [
                   nodejs_24
                   pnpm
+                  python314
+                  gnumake
+                  gcc
                   # Electron system library dependencies
                   # Note: some packages need explicit output refs because the
                   # default attribute doesn't point to the output with .so files
