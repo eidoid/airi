@@ -1401,7 +1401,15 @@ export const useProvidersStore = defineStore('providers', () => {
       defaultOptions: () => ({
         apiKey: '',
         baseUrl: 'https://api.minimax.io',
+        model: 'speech-2.8-hd',
         voice: '',
+        speed: 1,
+        volume: 1,
+        pitch: 0,
+        sampleRate: 32000,
+        bitrate: 128000,
+        channel: 1,
+        languageBoost: 'auto',
       }),
       createProvider: async (config) => {
         const apiKey = (config.apiKey as string).trim()
@@ -1419,7 +1427,16 @@ export const useProvidersStore = defineStore('providers', () => {
               const body = JSON.parse(init.body)
               const text = body.input as string
               const voiceId = (body.voice as string) || (config.voice as string) || 'English_Graceful_Lady'
-              const model = (body.model as string) || 'speech-2.8-hd'
+              const model = (body.model as string) || (config.model as string) || 'speech-2.8-hd'
+              const speed = typeof config.speed === 'number' ? config.speed : 1
+              const volume = typeof config.volume === 'number' ? config.volume : 1
+              const pitch = typeof config.pitch === 'number' ? config.pitch : 0
+              const sampleRate = typeof config.sampleRate === 'number' ? config.sampleRate : 32000
+              const bitrate = typeof config.bitrate === 'number' ? config.bitrate : 128000
+              const channel = typeof config.channel === 'number' ? config.channel : 1
+              const languageBoost = typeof config.languageBoost === 'string' && config.languageBoost.trim().length > 0
+                ? config.languageBoost.trim()
+                : 'auto'
 
               const response = await fetch(`${baseUrl}/v1/t2a_v2`, {
                 method: 'POST',
@@ -1430,18 +1447,19 @@ export const useProvidersStore = defineStore('providers', () => {
                 body: JSON.stringify({
                   model,
                   text,
+                  language_boost: languageBoost,
                   stream: true,
                   voice_setting: {
                     voice_id: voiceId,
-                    speed: 1,
-                    vol: 1,
-                    pitch: 0,
+                    speed,
+                    vol: volume,
+                    pitch,
                   },
                   audio_setting: {
-                    sample_rate: 32000,
-                    bitrate: 128000,
+                    sample_rate: sampleRate,
+                    bitrate,
                     format: 'mp3',
-                    channel: 1,
+                    channel,
                   },
                 }),
               })
