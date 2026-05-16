@@ -1,9 +1,8 @@
 import type { Env } from '../../../libs/env'
-import type { MqService } from '../../../libs/mq'
-import type { BillingEvent } from '../../../services/billing/billing-events'
 import type { BillingService } from '../../../services/billing/billing-service'
 import type { ConfigKVService } from '../../../services/config-kv'
 import type { FluxService } from '../../../services/flux'
+import type { RequestLogService } from '../../../services/request-log'
 import type { HonoEnv } from '../../../types/hono'
 
 import { Buffer } from 'node:buffer'
@@ -13,7 +12,6 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 
 import { createV1CompletionsRoutes } from '.'
 import { ApiError } from '../../../utils/error'
-import { DEFAULT_BILLING_EVENTS_STREAM } from '../../../utils/redis-keys'
 
 // --- Mock helpers ---
 
@@ -28,8 +26,13 @@ function createMockBillingService(flux = 100): BillingService {
   let balance = flux
   return {
     consumeFluxForLLM: vi.fn(async (input: { userId: string, amount: number }) => {
-      balance -= input.amount
-      return { userId: input.userId, flux: balance }
+      // Mirror billing-service.ts:debitFlux semantics so route tests see the
+      // same `charged < requested` signal that production callers handle.
+      if (balance <= 0)
+        throw Object.assign(new Error('Insufficient flux'), { statusCode: 402 })
+      const charged = Math.min(input.amount, balance)
+      balance -= charged
+      return { userId: input.userId, flux: balance, charged, requested: input.amount }
     }),
     creditFlux: vi.fn(),
     creditFluxFromStripeCheckout: vi.fn(),
@@ -65,15 +68,10 @@ function createMockConfigKV(overrides: Record<string, any> = {}): ConfigKVServic
   } as any
 }
 
-function createMockBillingMq(): MqService<BillingEvent> {
+function createMockRequestLogService(): RequestLogService {
   return {
-    stream: DEFAULT_BILLING_EVENTS_STREAM,
-    publish: vi.fn(async () => '1-0'),
-    ensureConsumerGroup: vi.fn(async () => true),
-    consume: vi.fn(async () => []),
-    claimIdleMessages: vi.fn(async () => []),
-    ack: vi.fn(async () => 1),
-  } as any
+    logRequest: vi.fn(async () => undefined),
+  }
 }
 
 function createMockRedis() {
@@ -111,7 +109,7 @@ function createTestApp(
   fluxService: FluxService,
   configKV: ConfigKVService,
   billingService?: BillingService,
-  billingMq?: MqService<BillingEvent>,
+  requestLogService?: RequestLogService,
   ttsMeter?: ReturnType<typeof createMockTtsMeter>,
   env?: Env,
   redis?: ReturnType<typeof createMockRedis>,
@@ -120,7 +118,7 @@ function createTestApp(
     fluxService,
     billingService ?? createMockBillingService(),
     configKV,
-    billingMq ?? createMockBillingMq(),
+    requestLogService ?? createMockRequestLogService(),
     ttsMeter ?? createMockTtsMeter(),
     (redis ?? createMockRedis()) as any,
     env ?? createMockEnv(),
@@ -193,6 +191,94 @@ describe('v1CompletionsRoutes', () => {
         { user: testUser } as any,
       )
       expect(res.status).toBe(402)
+    })
+
+    // ROOT CAUSE:
+    //
+    // Before: pre-flight gated only on `flux > 0`. A user with 0 < balance <
+    // fallbackRate could pass the gate, complete the stream, then either land
+    // in the catch path (insufficient balance throws) or — worse — race N
+    // parallel requests through and have all but one land unbilled.
+    //
+    // After: gate compares balance against `FLUX_PER_REQUEST` so the very
+    // first request a partially-funded user makes is rejected without
+    // touching the upstream. Combined with partial-debit semantics in
+    // `consumeFluxForLLM`, this closes both the serial-replay and concurrent
+    // race forms of the unpaid-usage exploit.
+    it('rejects pre-flight when balance is below FLUX_PER_REQUEST (Issue: unpaid-usage-exploit)', async () => {
+      const fluxService = createMockFluxService(5)
+      const billingService = createMockBillingService(5)
+      globalThis.fetch = vi.fn() as any
+      const app = createTestApp(
+        fluxService,
+        createMockConfigKV({ FLUX_PER_REQUEST: 38 }),
+        billingService,
+      )
+
+      const res = await app.fetch(
+        new Request('http://localhost/api/v1/openai/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'hi' }] }),
+        }),
+        { user: testUser } as any,
+      )
+
+      expect(res.status).toBe(402)
+      // Critical: upstream was never called — leak is closed before cost is incurred.
+      expect(globalThis.fetch).not.toHaveBeenCalled()
+      expect(billingService.consumeFluxForLLM).not.toHaveBeenCalled()
+    })
+
+    // ROOT CAUSE:
+    //
+    // Before: when usage arrived and `fluxConsumed > balance`, debitFlux
+    // threw, the response had already been delivered, and the user's balance
+    // never moved. Same user with the same script kept replaying.
+    //
+    // After: balance is drained to zero (`charged = balance`), the request
+    // log records the actual `charged` (5, not the full 38), and the next
+    // request fails the pre-flight gate.
+    it('non-streaming completion drains partial balance and logs charged (Issue: unpaid-usage-exploit)', async () => {
+      const upstreamBody = JSON.stringify({
+        id: 'chatcmpl-partial',
+        choices: [{ message: { content: 'hi' } }],
+        usage: { prompt_tokens: 20000, completion_tokens: 18000 },
+      })
+      globalThis.fetch = vi.fn(async () => new Response(upstreamBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+      // Balance 5 passes the gate when fallbackRate is 5 (matching schema default),
+      // but the per-token cost lands at ceil(38000/1000 * 1) = 38 → partial debit.
+      const fluxService = createMockFluxService(5)
+      const billingService = createMockBillingService(5)
+      const requestLogService = createMockRequestLogService()
+      const app = createTestApp(
+        fluxService,
+        createMockConfigKV({ FLUX_PER_REQUEST: 5, FLUX_PER_1K_TOKENS: 1 }),
+        billingService,
+        requestLogService,
+      )
+
+      const res = await app.fetch(
+        new Request('http://localhost/api/v1/openai/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'hi' }] }),
+        }),
+        { user: testUser } as any,
+      )
+
+      expect(res.status).toBe(200)
+      // Caller asked for 38 (token-based cost), mock-billing returns charged=5.
+      expect(billingService.consumeFluxForLLM).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 38 }),
+      )
+      expect(requestLogService.logRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', fluxConsumed: 5 }),
+      )
     })
 
     it('should proxy upstream response on success', async () => {
@@ -333,14 +419,14 @@ describe('v1CompletionsRoutes', () => {
       expect(res.status).toBe(503)
     })
 
-    it('should publish request log event via billingMq', async () => {
+    it('writes a synchronous llm_request_log entry after a successful debit', async () => {
       globalThis.fetch = vi.fn(async () => new Response('{}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
 
-      const billingMq = createMockBillingMq()
-      const app = createTestApp(createMockFluxService(), createMockConfigKV(), undefined, billingMq)
+      const requestLogService = createMockRequestLogService()
+      const app = createTestApp(createMockFluxService(), createMockConfigKV(), undefined, requestLogService)
 
       await app.fetch(
         new Request('http://localhost/api/v1/openai/chat/completions', {
@@ -351,16 +437,12 @@ describe('v1CompletionsRoutes', () => {
         { user: testUser } as any,
       )
 
-      expect(billingMq.publish).toHaveBeenCalledWith(
+      expect(requestLogService.logRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          eventType: 'llm.request.log',
-          aggregateId: 'user-1',
           userId: 'user-1',
-          payload: expect.objectContaining({
-            model: 'gpt-4',
-            status: 200,
-            fluxConsumed: 1,
-          }),
+          model: 'gpt-4',
+          status: 200,
+          fluxConsumed: 1,
         }),
       )
     })
@@ -385,8 +467,8 @@ describe('v1CompletionsRoutes', () => {
       }))
 
       const billingService = createMockBillingService(100)
-      const billingMq = createMockBillingMq()
-      const app = createTestApp(createMockFluxService(100), createMockConfigKV(), billingService, billingMq)
+      const requestLogService = createMockRequestLogService()
+      const app = createTestApp(createMockFluxService(100), createMockConfigKV(), billingService, requestLogService)
 
       const res = await app.fetch(
         new Request('http://localhost/api/v1/openai/chat/completions', {
@@ -403,7 +485,7 @@ describe('v1CompletionsRoutes', () => {
       await Promise.resolve()
 
       expect(billingService.consumeFluxForLLM).not.toHaveBeenCalled()
-      expect(billingMq.publish).not.toHaveBeenCalled()
+      expect(requestLogService.logRequest).not.toHaveBeenCalled()
     })
   })
 

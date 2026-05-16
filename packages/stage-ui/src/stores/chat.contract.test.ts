@@ -7,6 +7,14 @@ import { ref } from 'vue'
 
 import { useChatOrchestratorStore } from './chat'
 
+vi.hoisted(() => {
+  ;(globalThis as any).window = {
+    location: {
+      origin: 'http://localhost',
+    },
+  }
+})
+
 const llmStreamMock = vi.fn()
 const trackFirstMessageMock = vi.fn()
 const ingestContextMessageMock = vi.fn()
@@ -126,6 +134,9 @@ vi.mock('./chat/session-store', () => ({
     persistSessionMessages: persistSessionMessagesMock,
     getSessionGeneration: () => currentGeneration,
     forkSession: forkSessionMock,
+    // Cloud sync surface used by `chat.ts performSend`. Mocked as a no-op so
+    // the orchestrator contract tests do not need a real WS / cloud mapper.
+    pushMessageToCloud: vi.fn().mockResolvedValue(undefined),
   }),
 }))
 
@@ -144,6 +155,18 @@ vi.mock('./llm', () => ({
 vi.mock('./modules/consciousness', () => ({
   useConsciousnessStore: () => ({
     activeProvider: ref('mock-provider'),
+  }),
+}))
+
+vi.mock('./modules/airi-card', () => ({
+  useAiriCardStore: () => ({
+    activeCard: undefined,
+  }),
+}))
+
+vi.mock('./modules/artistry-autonomous', () => ({
+  useAutonomousArtistryStore: () => ({
+    runArtistTask: vi.fn(),
   }),
 }))
 
@@ -195,6 +218,7 @@ describe('chat orchestrator contract', () => {
     llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, messages: Message[], options: any) => {
       composedMessages = messages
       expect(options.waitForTools).toBe(true)
+      expect(options.captureToolErrors).toBe(true)
 
       await options.onStreamEvent({ type: 'text-delta', text: 'hello' })
       await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })

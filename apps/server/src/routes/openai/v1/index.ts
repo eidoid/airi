@@ -2,14 +2,13 @@ import type { Context } from 'hono'
 import type Redis from 'ioredis'
 
 import type { Env } from '../../../libs/env'
-import type { MqService } from '../../../libs/mq'
-import type { GenAiMetrics } from '../../../libs/otel'
+import type { GenAiMetrics, RateLimitMetrics, RevenueMetrics } from '../../../otel'
 import type { UsageInfo } from '../../../services/billing/billing'
-import type { BillingEvent } from '../../../services/billing/billing-events'
 import type { BillingService } from '../../../services/billing/billing-service'
 import type { FluxMeter } from '../../../services/billing/flux-meter'
 import type { ConfigKVService } from '../../../services/config-kv'
 import type { FluxService } from '../../../services/flux'
+import type { RequestLogService } from '../../../services/request-log'
 import type { HonoEnv } from '../../../types/hono'
 
 import { useLogger } from '@guiiai/logg'
@@ -82,7 +81,18 @@ function getLlmMetricAttributes(opts: { model: string, type: string, status: num
   }
 }
 
-export function createV1CompletionsRoutes(fluxService: FluxService, billingService: BillingService, configKV: ConfigKVService, billingMq: MqService<BillingEvent>, ttsMeter: FluxMeter, redis: Redis, env: Env, genAi?: GenAiMetrics | null) {
+export function createV1CompletionsRoutes(
+  fluxService: FluxService,
+  billingService: BillingService,
+  configKV: ConfigKVService,
+  requestLogService: RequestLogService,
+  ttsMeter: FluxMeter,
+  redis: Redis,
+  env: Env,
+  genAi?: GenAiMetrics | null,
+  revenue?: RevenueMetrics | null,
+  rateLimitMetrics?: RateLimitMetrics | null,
+) {
   const logger = useLogger('v1-completions').useGlobalConfig()
   // TODO: Extract this compat route into smaller facades/modules.
   // It currently mixes auth, rate limiting, proxying, billing, telemetry, and event publishing in one transport layer entrypoint.
@@ -100,23 +110,11 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
       genAi.tokenUsageOutput.add(opts.completionTokens, attrs)
   }
 
-  function publishRequestLog(entry: { userId: string, model: string, status: number, durationMs: number, fluxConsumed: number, promptTokens?: number, completionTokens?: number }) {
-    billingMq.publish({
-      eventId: nanoid(),
-      eventType: 'llm.request.log' as const,
-      aggregateId: entry.userId,
-      userId: entry.userId,
-      occurredAt: new Date().toISOString(),
-      schemaVersion: 1,
-      payload: {
-        model: entry.model,
-        status: entry.status,
-        durationMs: entry.durationMs,
-        fluxConsumed: entry.fluxConsumed,
-        promptTokens: entry.promptTokens,
-        completionTokens: entry.completionTokens,
-      },
-    }).catch(err => logger.withError(err).warn('Failed to publish request log event'))
+  function recordRequestLog(entry: { userId: string, model: string, status: number, durationMs: number, fluxConsumed: number, promptTokens?: number, completionTokens?: number }) {
+    // Best-effort: a failed request log must not surface to the user — the
+    // upstream LLM response has already been delivered (or is mid-stream) by
+    // the time we get here. Log loss is observability-only.
+    requestLogService.logRequest(entry).catch(err => logger.withError(err).warn('Failed to write llm_request_log row'))
   }
 
   // NOTICE: Billing is best-effort — flux is debited AFTER the LLM response is sent.
@@ -125,10 +123,23 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
   // Failed debits are logged at error level for monitoring/alerting.
   // A pre-debit model would require holding the response until billing confirms,
   // which adds latency and complicates streaming. We accept the leak for now.
+  //
+  // Pre-flight gates on `balance >= fallbackRate` (not just `> 0`) because
+  // streaming providers that don't echo `usage` cause every billable request
+  // to fall back to `FLUX_PER_REQUEST`. Without this gate, a user sitting on
+  // `0 < balance < fallbackRate` could spawn N parallel requests that each
+  // pass the loose `>0` check, complete the stream, and race on the debit —
+  // first wins, rest land in the partial-debit / catch path unbilled. With
+  // the gate, concurrent requests are rejected before the upstream call.
   async function handleCompletion(c: Context<HonoEnv>) {
     const user = c.get('user')!
+    // Read billing rates before pre-flight so the gate can compare against
+    // the realistic per-request cost (fallback rate), not just `> 0`.
+    const fallbackRate = await configKV.getOrThrow('FLUX_PER_REQUEST')
+    const fluxPer1kTokens = await configKV.get('FLUX_PER_1K_TOKENS')
+
     const flux = await fluxService.getFlux(user.id)
-    if (flux.flux <= 0) {
+    if (flux.flux < fallbackRate) {
       throw createPaymentRequiredError('Insufficient flux')
     }
 
@@ -172,9 +183,9 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
       })
     }
 
-    // Post-billing: parse usage and charge after successful response
-    const fallbackRate = await configKV.getOrThrow('FLUX_PER_REQUEST')
-    const fluxPer1kTokens = await configKV.get('FLUX_PER_1K_TOKENS')
+    // Post-billing: parse usage and charge after successful response.
+    // `fallbackRate` / `fluxPer1kTokens` were hoisted to the top of this
+    // function so the pre-flight gate can use them too.
 
     if (body.stream) {
       // Streaming: return response immediately, bill after stream ends
@@ -186,6 +197,11 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
       let tailBuffer = ''
       let streamCompleted = false
       let streamInterrupted = false
+      // First-chunk timestamp for gen_ai.client.first_token.duration. Latched
+      // on the first byte from upstream — captures perceived "time to first
+      // token" for streaming clients. NaN until the first chunk lands so
+      // `Number.isFinite` gates the histogram record.
+      let firstChunkAt = Number.NaN
 
       // Process stream in background
       ;(async () => {
@@ -196,6 +212,13 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
               streamCompleted = true
               break
             }
+            if (!Number.isFinite(firstChunkAt)) {
+              firstChunkAt = Date.now()
+              genAi?.firstTokenDuration.record((firstChunkAt - startedAt) / 1000, {
+                [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
+                [GEN_AI_ATTR_OPERATION_NAME]: 'chat',
+              })
+            }
             await writer.write(value)
             const text = decoder.decode(value, { stream: true })
             tailBuffer = (tailBuffer + text).slice(-2048)
@@ -205,6 +228,12 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
           streamInterrupted = true
           span.setStatus({ code: SpanStatusCode.ERROR, message: 'Gateway stream interrupted' })
           span.setAttribute(AIRI_ATTR_GEN_AI_STREAM_INTERRUPTED, true)
+          // Counter so alerts/dashboards can fire on interrupted streams; the
+          // span attribute alone only shows up in trace search, not metrics.
+          genAi?.streamInterrupted.add(1, {
+            [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
+            stage: Number.isFinite(firstChunkAt) ? 'mid_stream' : 'before_first_chunk',
+          })
 
           try {
             await writer.abort(err)
@@ -254,10 +283,16 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
             // Debit flux via DB transaction (source of truth)
             // NOTICE: streaming response is already sent, so we cannot reject on failure.
             // Log at error level so unpaid usage is visible in monitoring/alerts.
+            //
+            // `consumeFluxForLLM` now drains to zero on partial balance instead
+            // of throwing — the catch path only fires on `balance <= 0` (post-
+            // race) or real DB errors. Partial debits are signalled via the
+            // returned `charged < requested` and accounted to the same
+            // `fluxUnbilled` counter (different `reason` label).
             const requestId = nanoid()
             let actualCharged = 0
             try {
-              await billingService.consumeFluxForLLM({
+              const result = await billingService.consumeFluxForLLM({
                 userId: user.id,
                 amount: fluxConsumed,
                 requestId,
@@ -266,11 +301,36 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
                 promptTokens: usage.promptTokens,
                 completionTokens: usage.completionTokens,
               })
-              actualCharged = fluxConsumed
+              actualCharged = result.charged
+              if (result.charged < result.requested) {
+                revenue?.fluxUnbilled.add(result.requested - result.charged, {
+                  [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
+                  reason: 'partial_debit_drained',
+                  stage: 'streaming',
+                })
+                logger.withFields({
+                  userId: user.id,
+                  requestId,
+                  requested: result.requested,
+                  charged: result.charged,
+                  unbilled: result.requested - result.charged,
+                }).warn('Partial debit after streaming — flux drained to zero')
+              }
             }
-            catch (err) { logger.withError(err).withFields({ userId: user.id, fluxConsumed, requestId }).error('Failed to debit flux after streaming — unpaid usage') }
+            catch (err) {
+              // Real revenue leak: streaming response already sent (HTTP 200,
+              // tokens delivered), so this catch produces no 5xx and no DB
+              // latency spike on the request path. Without a dedicated counter,
+              // the failure is silent. Page on any sustained `increase()`.
+              revenue?.fluxUnbilled.add(fluxConsumed, {
+                [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
+                reason: 'debit_failed',
+                stage: 'streaming',
+              })
+              logger.withError(err).withFields({ userId: user.id, fluxConsumed, requestId }).error('Failed to debit flux after streaming — unpaid usage')
+            }
 
-            publishRequestLog({
+            recordRequestLog({
               userId: user.id,
               model: requestModel,
               status: response.status,
@@ -302,10 +362,12 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
     span.end()
     recordMetrics({ model: requestModel, status: response.status, type: 'chat', durationMs, fluxConsumed, ...usage })
 
-    // Debit flux via DB transaction (source of truth)
-    // NOTICE: no try/catch — debit failure (e.g. insufficient balance) must block the response
+    // Debit flux via DB transaction (source of truth).
+    // The upstream call has already happened (cost incurred), so partial
+    // debit + `fluxUnbilled` is the only sane recovery — same shape as the
+    // streaming path. `balance <= 0` still throws and bubbles up as 402.
     const requestId = nanoid()
-    await billingService.consumeFluxForLLM({
+    const result = await billingService.consumeFluxForLLM({
       userId: user.id,
       amount: fluxConsumed,
       requestId,
@@ -314,13 +376,27 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
     })
+    if (result.charged < result.requested) {
+      revenue?.fluxUnbilled.add(result.requested - result.charged, {
+        [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
+        reason: 'partial_debit_drained',
+        stage: 'non_streaming',
+      })
+      logger.withFields({
+        userId: user.id,
+        requestId,
+        requested: result.requested,
+        charged: result.charged,
+        unbilled: result.requested - result.charged,
+      }).warn('Partial debit on non-streaming completion — flux drained to zero')
+    }
 
-    publishRequestLog({
+    recordRequestLog({
       userId: user.id,
       model: requestModel,
       status: response.status,
       durationMs,
-      fluxConsumed,
+      fluxConsumed: result.charged,
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
     })
@@ -397,7 +473,7 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
     span.end()
     recordMetrics({ model: requestModel, status: response.status, type: 'tts', durationMs, fluxConsumed })
 
-    publishRequestLog({
+    recordRequestLog({
       userId: user.id,
       model: requestModel,
       status: response.status,
@@ -462,7 +538,7 @@ export function createV1CompletionsRoutes(fluxService: FluxService, billingServi
   const ttsGuard = configGuard(configKV, ['FLUX_PER_1K_CHARS_TTS'], 'TTS service is not available yet')
 
   // 60 requests per minute per user for LLM completions
-  const completionsRateLimit = rateLimiter({ max: 60, windowSec: 60 })
+  const completionsRateLimit = rateLimiter({ max: 60, windowSec: 60, metrics: rateLimitMetrics, routeLabel: 'openai.completions' })
 
   return new Hono<HonoEnv>()
     .use('*', authGuard)

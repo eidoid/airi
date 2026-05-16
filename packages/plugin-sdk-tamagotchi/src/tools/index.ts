@@ -1,5 +1,5 @@
 import type { ContextInit } from '@proj-airi/plugin-sdk'
-import type { HostDataRecord } from '@proj-airi/plugin-sdk/plugin-host'
+import type { HostDataRecord, ToolsetPromptManifest } from '@proj-airi/plugin-sdk/plugin-host'
 import type { JsonSchema, Schema as StandardSchemaV1 } from 'xsschema'
 
 import { hostDataRecordSchema } from '@proj-airi/plugin-sdk/plugin-host'
@@ -22,6 +22,7 @@ import { toJsonSchema } from 'xsschema'
 export interface ToolExecutionGameletApi {
   open: (id: string, params?: HostDataRecord) => Promise<void>
   configure: (id: string, patch: HostDataRecord) => Promise<void>
+  request: (id: string, payload: HostDataRecord, options?: { timeoutMs?: number }) => Promise<HostDataRecord>
   close: (id: string) => Promise<void>
   isOpen: (id: string) => Promise<boolean> | boolean
 }
@@ -117,6 +118,8 @@ export interface PluginToolDefinition<TInputSchema = unknown> {
  * - Resolves once every tool has been registered with the host
  */
 export interface DefineToolsetOptions<TInputSchema = unknown> {
+  id?: string
+  prompt?: ToolsetPromptManifest
   tools: Array<PluginToolDefinition<TInputSchema>>
 }
 
@@ -129,6 +132,7 @@ function isToolExecutionGameletApi(value: unknown): value is ToolExecutionGamele
 
   return typeof candidate.open === 'function'
     && typeof candidate.configure === 'function'
+    && typeof candidate.request === 'function'
     && typeof candidate.close === 'function'
     && typeof candidate.isOpen === 'function'
 }
@@ -208,6 +212,88 @@ function toHostDataRecord(value: object): HostDataRecord {
   return value as HostDataRecord
 }
 
+function isJsonSchemaNode(value: JsonSchema | boolean | JsonSchema[] | undefined): value is JsonSchema {
+  return Boolean(value && !Array.isArray(value) && typeof value === 'object')
+}
+
+function withNullableValue(schema: JsonSchema): JsonSchema {
+  const next: JsonSchema = { ...schema }
+
+  if (Array.isArray(next.enum)) {
+    next.enum = next.enum.includes(null) ? next.enum : [...next.enum, null]
+    return next
+  }
+
+  if (Array.isArray(next.type)) {
+    next.type = next.type.includes('null') ? next.type : [...next.type, 'null']
+    return next
+  }
+
+  if (typeof next.type === 'string') {
+    next.type = next.type === 'null' ? next.type : [next.type, 'null']
+    return next
+  }
+
+  next.anyOf = [...(next.anyOf ?? []), { type: 'null' }]
+  return next
+}
+
+/**
+ * Normalizes plugin tool JSON Schema for strict OpenAI-compatible validators.
+ *
+ * Before:
+ * - `{ properties: { optionalName: { type: "string" } }, required: [] }`
+ *
+ * After:
+ * - `{ properties: { optionalName: { type: ["string", "null"] } }, required: ["optionalName"] }`
+ */
+function normalizeStrictToolParameterSchema(schema: JsonSchema): JsonSchema {
+  const next: JsonSchema = { ...schema }
+
+  if (next.properties) {
+    const currentRequired = new Set(next.required ?? [])
+    const normalizedProperties = Object.fromEntries(
+      Object.entries(next.properties).map(([key, value]) => {
+        if (!isJsonSchemaNode(value)) {
+          return [key, value]
+        }
+
+        const normalizedValue = normalizeStrictToolParameterSchema(value)
+        return [
+          key,
+          currentRequired.has(key)
+            ? normalizedValue
+            : withNullableValue(normalizedValue),
+        ]
+      }),
+    )
+
+    next.properties = normalizedProperties
+    next.required = Object.keys(normalizedProperties)
+  }
+
+  if (Array.isArray(next.items)) {
+    next.items = next.items.map(item => isJsonSchemaNode(item) ? normalizeStrictToolParameterSchema(item) : item)
+  }
+  else if (isJsonSchemaNode(next.items)) {
+    next.items = normalizeStrictToolParameterSchema(next.items)
+  }
+
+  if (next.anyOf) {
+    next.anyOf = next.anyOf.map(value => isJsonSchemaNode(value) ? normalizeStrictToolParameterSchema(value) : value)
+  }
+
+  if (next.oneOf) {
+    next.oneOf = next.oneOf.map(value => isJsonSchemaNode(value) ? normalizeStrictToolParameterSchema(value) : value)
+  }
+
+  if (next.allOf) {
+    next.allOf = next.allOf.map(value => isJsonSchemaNode(value) ? normalizeStrictToolParameterSchema(value) : value)
+  }
+
+  return next
+}
+
 /**
  * Normalizes tool parameter schemas into the host-safe record shape expected by plugin-sdk.
  *
@@ -219,11 +305,11 @@ function toHostDataRecord(value: object): HostDataRecord {
  */
 async function serializeToolParameters(inputSchema: unknown): Promise<HostDataRecord> {
   if (isStandardSchema(inputSchema)) {
-    return toHostDataRecord(await toJsonSchema(inputSchema))
+    return toHostDataRecord(normalizeStrictToolParameterSchema(await toJsonSchema(inputSchema)))
   }
 
   if (isJsonSchemaRecord(inputSchema)) {
-    return toHostDataRecord(structuredClone(inputSchema))
+    return toHostDataRecord(normalizeStrictToolParameterSchema(structuredClone(inputSchema)))
   }
 
   throw new TypeError('Tool input schema must be a JSON Schema object or a Standard Schema instance.')
@@ -247,7 +333,16 @@ export async function defineToolset(
 ): Promise<void> {
   const executionContext = createToolExecutionContext(ctx)
 
+  if (options.prompt) {
+    await ctx.apis.tools.registerToolsetPrompt({
+      id: options.id ?? options.prompt.id,
+      prompt: options.prompt,
+    })
+  }
+
   for (const definition of options.tools) {
+    const isAvailable = definition.isAvailable
+
     await ctx.apis.tools.register({
       tool: {
         id: definition.id,
@@ -259,8 +354,8 @@ export async function defineToolset(
         },
         parameters: await serializeToolParameters(definition.inputSchema),
       },
-      availability: definition.isAvailable
-        ? () => definition.isAvailable?.(executionContext)
+      availability: isAvailable
+        ? () => isAvailable(executionContext)
         : undefined,
       execute: input => definition.execute(input, executionContext),
     })

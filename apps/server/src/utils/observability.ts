@@ -37,6 +37,11 @@ export const METRIC_AUTH_FAILURES = 'auth.failures'
 export const METRIC_USER_REGISTERED = 'user.registered'
 export const METRIC_USER_LOGIN = 'user.login'
 export const METRIC_USER_ACTIVE_SESSIONS = 'user.active_sessions'
+// Distinct users with at least one non-expired session row. Pair with
+// USER_ACTIVE_SESSIONS to detect "session row inflation" (Better Auth
+// creates a new row per sign-in / per OIDC token refresh and never GCs)
+// vs real user growth.
+export const METRIC_USER_DISTINCT_ACTIVE = 'user.distinct_active'
 
 // Engagement (AIRI custom)
 export const METRIC_CHAT_MESSAGES = 'chat.messages'
@@ -61,6 +66,33 @@ export const METRIC_GEN_AI_CLIENT_OPERATION_COUNT = 'gen_ai.client.operation.cou
 export const METRIC_GEN_AI_CLIENT_TOKEN_USAGE_INPUT = 'gen_ai.client.token.usage.input'
 export const METRIC_GEN_AI_CLIENT_TOKEN_USAGE_OUTPUT = 'gen_ai.client.token.usage.output'
 export const METRIC_FLUX_CONSUMED = 'airi.billing.flux.consumed'
+
+// AIRI billing — credit/debit visibility beyond raw consumption
+export const METRIC_AIRI_FLUX_CREDITED = 'airi.billing.flux.credited'
+// Streaming-only: token already streamed to user but post-stream debit failed.
+// Real revenue leak — every >0 sample should page. NOT covered by DB latency /
+// HTTP 5xx alerts because the response was 2xx and the catch path is silent.
+export const METRIC_AIRI_FLUX_UNBILLED = 'airi.billing.flux.unbilled'
+export const METRIC_AIRI_TTS_CHARS = 'airi.billing.tts.chars'
+export const METRIC_AIRI_TTS_PREFLIGHT_REJECTIONS = 'airi.billing.tts.preflight_rejections'
+
+// AIRI observability — self-monitoring for the metric pipeline
+export const METRIC_AIRI_OBSERVABILITY_READ_ERRORS = 'airi.observability.read_errors'
+
+// AIRI revenue — actual money in (smallest currency unit, e.g. cents)
+export const METRIC_AIRI_STRIPE_REVENUE = 'airi.stripe.revenue'
+
+// AIRI email — transactional delivery health
+export const METRIC_AIRI_EMAIL_SEND = 'airi.email.send'
+export const METRIC_AIRI_EMAIL_FAILURES = 'airi.email.failures'
+export const METRIC_AIRI_EMAIL_DURATION = 'airi.email.duration'
+
+// AIRI rate limiting — abuse / attack visibility
+export const METRIC_AIRI_RATE_LIMIT_BLOCKED = 'airi.rate_limit.blocked'
+
+// AIRI GenAI — stream quality
+export const METRIC_AIRI_GEN_AI_STREAM_INTERRUPTED = 'airi.gen_ai.stream.interrupted'
+export const METRIC_GEN_AI_CLIENT_FIRST_TOKEN_DURATION = 'gen_ai.client.first_token.duration'
 
 // ---------------------------------------------------------------------------
 // Helpers

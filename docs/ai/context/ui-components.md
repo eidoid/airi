@@ -74,6 +74,16 @@ Loading placeholder with animation.
 
 **Slots**: `default`
 
+### Truncatable
+
+Line-clamped content container that expands and collapses when the overflowing content area is clicked.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `lineClamp` | `number?` | `3` | Maximum visible lines while collapsed |
+
+**Slots**: `default`
+
 ---
 
 ## Misc
@@ -369,6 +379,7 @@ Searchable dropdown/autocomplete using reka-ui with grouping.
 | `options` | `ComboboxOptionItem<T>[] \| ComboboxOptionGroupItem<T>[]` | *(required)* | Options |
 | `placeholder` | `string?` | — | Placeholder |
 | `disabled` | `boolean?` | `false` | Disabled |
+| `openOnClick` | `boolean?` | `true` | Auto-open dropdown on click |
 | `contentMinWidth` | `string \| number?` | — | Dropdown min width |
 | `contentWidth` | `string \| number?` | — | Dropdown width |
 
@@ -384,6 +395,7 @@ Simplified Combobox wrapper for string/number options.
 | `options` | `{ label, value, description?, disabled?, icon? }[]?` | — | Options |
 | `placeholder` | `string?` | — | Placeholder |
 | `disabled` | `boolean?` | `false` | Disabled |
+| `openOnClick` | `boolean?` | `true` | Auto-open dropdown on click |
 | `title` | `string?` | — | Title |
 | `layout` | `'horizontal' \| 'vertical'?` | — | Layout direction |
 | `contentMinWidth` | `string \| number?` | — | Dropdown min width |
@@ -517,6 +529,7 @@ All Field components wrap a base input with `label`, `description`, and consiste
 | `options` | `{ label, value, description?, disabled?, icon? }[]?` | — | Options |
 | `placeholder` | `string?` | — | Placeholder |
 | `disabled` | `boolean?` | `false` | Disabled |
+| `openOnClick` | `boolean?` | `true` | Auto-open dropdown on click |
 | `layout` | `'horizontal' \| 'vertical'` | `'horizontal'` | Layout |
 
 **v-model**: `modelValue: string`
