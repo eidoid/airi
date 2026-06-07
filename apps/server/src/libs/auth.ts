@@ -1,17 +1,19 @@
 import type { AuthMetrics } from '../otel'
-import type { EmailService } from '../services/email'
-import type { UserDeletionService } from '../services/user-deletion'
+import type { EmailService } from '../services/adapters/email'
+import type { ProductEventService } from '../services/domain/product-events'
+import type { UserDeletionService } from '../services/domain/user-deletion'
 import type { Database } from './db'
 import type { Env } from './env'
 
 import { Buffer } from 'node:buffer'
 
 import { oauthProvider } from '@better-auth/oauth-provider'
+import { useLogger } from '@guiiai/logg'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { createAuthMiddleware } from 'better-auth/api'
 import { deleteSessionCookie } from 'better-auth/cookies'
-import { bearer, jwt, magicLink } from 'better-auth/plugins'
+import { admin, bearer, jwt, magicLink } from 'better-auth/plugins'
 import { eq } from 'drizzle-orm'
 
 import { ApiError } from '../utils/error'
@@ -19,6 +21,8 @@ import { getAuthTrustedOrigins, getTrustedOrigin } from '../utils/origin'
 import { oidcJwtBearer } from './auth-plugins/oidc-jwt-bearer'
 
 import * as authSchema from '../schemas/accounts'
+
+const logger = useLogger('auth').useGlobalConfig()
 
 interface TrustedClientSeed {
   clientId: string
@@ -361,6 +365,7 @@ export function createAuth(
   email?: EmailService,
   metrics?: AuthMetrics | null,
   userDeletionService?: UserDeletionService,
+  productEventService?: ProductEventService,
 ) {
   return betterAuth({
     secret: env.BETTER_AUTH_SECRET,
@@ -373,12 +378,32 @@ export function createAuth(
     }),
 
     // NOTICE: disabledPaths prevents better-auth's built-in /token route from
-    // conflicting with oauthProvider's /oauth2/token endpoint.
-    disabledPaths: ['/token'],
+    // conflicting with oauthProvider's /oauth2/token endpoint, and locks down
+    // the admin plugin's high-blast-radius endpoints. We only expose the read +
+    // ban/session-management subset (list-users, ban-user, unban-user,
+    // list-user-sessions, revoke-user-session(s), get-user, has-permission);
+    // account-takeover-grade actions stay disabled. Role grants are managed
+    // out-of-band (manual DB update), so /admin/set-role is disabled too.
+    disabledPaths: [
+      '/token',
+      '/admin/create-user',
+      '/admin/update-user',
+      '/admin/set-role',
+      '/admin/set-user-password',
+      '/admin/remove-user',
+      '/admin/impersonate-user',
+      '/admin/stop-impersonating',
+    ],
 
     plugins: [
       bearer(),
       jwt(),
+      // Role-based admin: adds `user.role/banned/banReason/banExpires` and
+      // `session.impersonatedBy`, gates /admin/* by `role === 'admin'`, and
+      // blocks banned users at `session.create.before`. The stateless OIDC JWT
+      // hot path is NOT covered by that hook, so `resolveRequestAuth` and the
+      // /oauth2/userinfo guard re-check `user.banned` themselves.
+      admin({ adminRoles: ['admin'] }),
       // NOTICE:
       // Bridges OIDC JWT access tokens (RS256, signed by our oauthProvider)
       // into a real better-auth session so `sessionMiddleware` and every
@@ -637,15 +662,59 @@ export function createAuth(
     databaseHooks: {
       user: {
         create: {
-          after: async () => {
+          after: async (user) => {
             metrics?.userRegistered.add(1)
+            void productEventService?.track({
+              userId: user.id,
+              feature: 'auth',
+              action: 'user_signed_up',
+              status: 'succeeded',
+              source: 'better-auth.user.create',
+            })
+          },
+        },
+        update: {
+          // NOTICE:
+          // Revoke OAuth credentials when a user gets banned. The admin plugin's
+          // `banUser` sets `banned=true` via internalAdapter.updateUser (firing
+          // this hook) and deletes sessions, but leaves oauth_refresh_token /
+          // oauth_access_token rows. oauthProvider's /oauth2/token refresh grant
+          // (node_modules/@better-auth/oauth-provider/dist/index.mjs L718) loads
+          // the user without checking `banned`, so a banned user could otherwise
+          // mint a fresh access token from a live refresh token. That token is
+          // already rejected on every resource path by isUserBannedNow, but we
+          // delete the tokens here so the ban severs credentials at the source.
+          // Idempotent; fires on every user update but only acts when banned.
+          // Removal condition: oauthProvider checks `banned` in its refresh path.
+          after: async (user) => {
+            if ((user as { banned?: boolean | null }).banned !== true)
+              return
+            await db.delete(authSchema.oauthRefreshToken).where(eq(authSchema.oauthRefreshToken.userId, user.id))
+            await db.delete(authSchema.oauthAccessToken).where(eq(authSchema.oauthAccessToken.userId, user.id))
           },
         },
       },
       session: {
         create: {
-          after: async () => {
+          // NOTE: login-time ban enforcement is the admin plugin's
+          // `session.create.before` (checks `user.banned`). We only keep the
+          // `after` hook for last-seen / analytics.
+          after: async (session) => {
             metrics?.userLogin.add(1)
+            // Best-effort analytics: session creation must not fail because
+            // active-user reporting is degraded.
+            void db
+              .update(authSchema.user)
+              .set({ lastSeenAt: new Date() })
+              .where(eq(authSchema.user.id, session.userId))
+              .catch(err => logger.withError(err).withFields({ userId: session.userId }).warn('Failed to update user lastSeenAt; continuing session create'))
+            void productEventService?.track({
+              userId: session.userId,
+              feature: 'auth',
+              action: 'session_started',
+              status: 'succeeded',
+              source: 'better-auth.session.create',
+            })
           },
         },
       },

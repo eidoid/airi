@@ -1,23 +1,28 @@
 import type Redis from 'ioredis'
-import type { PostHog } from 'posthog-node'
 
 import type { AuthInstance } from './libs/auth'
 import type { Database } from './libs/db'
 import type { Env } from './libs/env'
 import type { OtelInstance } from './otel'
-import type { AdminFluxGrantsService } from './services/admin-flux-grants'
-import type { BillingService } from './services/billing/billing-service'
-import type { FluxMeter } from './services/billing/flux-meter'
-import type { CharacterService } from './services/characters'
-import type { ChatService } from './services/chats'
-import type { ConfigKVService } from './services/config-kv'
-import type { FluxService } from './services/flux'
-import type { FluxTransactionService } from './services/flux-transaction'
-import type { ProviderService } from './services/providers'
-import type { RequestLogService } from './services/request-log'
-import type { StripeService } from './services/stripe'
-import type { UserDeletionService } from './services/user-deletion'
+import type { ConfigKVService } from './services/adapters/config-kv'
+import type { AdminFluxGrantsService } from './services/domain/admin/flux-grants'
+import type { AdminRouterConfigService } from './services/domain/admin/router-config'
+import type { AdminUsersService } from './services/domain/admin/users'
+import type { BillingService } from './services/domain/billing/billing-service'
+import type { FluxMeter } from './services/domain/billing/flux-meter'
+import type { CharacterService } from './services/domain/characters'
+import type { ChatService } from './services/domain/chats'
+import type { FluxService } from './services/domain/flux'
+import type { FluxTransactionService } from './services/domain/flux-transaction'
+import type { LlmRouterService } from './services/domain/llm-router'
+import type { ProductEventService } from './services/domain/product-events'
+import type { ProviderService } from './services/domain/providers'
+import type { RequestLogService } from './services/domain/request-log'
+import type { StripeService } from './services/domain/stripe'
+import type { UserDeletionService } from './services/domain/user-deletion'
+import type { VoicePackService } from './services/domain/voice-packs'
 import type { HonoEnv } from './types/hono'
+import type { EnvelopeCrypto } from './utils/envelope-crypto'
 
 import process from 'node:process'
 
@@ -39,34 +44,50 @@ import { parsedEnv } from './libs/env'
 import { initializeExternalDependency } from './libs/external-dependency'
 import { createRedis } from './libs/redis'
 import { resolveRequestAuth } from './libs/request-auth'
+import { createUnauthorizedWsEvents } from './libs/ws-auth'
 import { sessionMiddleware } from './middlewares/auth'
 import { emitOtelLog, initOtel } from './otel'
 import { registerActiveSessionsGauge } from './otel/gauges/active-sessions'
 import { registerDistinctActiveUsersGauge } from './otel/gauges/distinct-active-users'
+import { registerRollingActiveUsersGauge } from './otel/gauges/rolling-active-users'
+import { registerTotalUsersGauge } from './otel/gauges/total-users'
+import { registerTtsPoolGauge } from './otel/gauges/tts-pool'
+import { createAdminRoutes } from './routes/admin'
+import { createAdminUiRoutes } from './routes/admin-ui'
+import { createAdminRouterConfigRoutes } from './routes/admin/config/router'
 import { createAdminFluxGrantsRoutes } from './routes/admin/flux-grants'
+import { createAdminUsersRoutes } from './routes/admin/users'
+import { createAdminVoicePackRoutes } from './routes/admin/voice-packs'
+import { createAudioSpeechWsHandlers } from './routes/audio-speech-ws'
 import { createAuthRoutes } from './routes/auth'
 import { createCharacterRoutes } from './routes/characters'
 import { createChatWsHandlers } from './routes/chat-ws'
 import { createChatRoutes } from './routes/chats'
 import { createFluxRoutes } from './routes/flux'
-import { createV1CompletionsRoutes } from './routes/openai/v1'
+import { createV1Routes } from './routes/openai/v1'
 import { createProviderRoutes } from './routes/providers'
 import { createStripeRoutes } from './routes/stripe'
-import { createAdminFluxGrantsService } from './services/admin-flux-grants'
-import { createBillingService } from './services/billing/billing-service'
-import { createFluxMeter } from './services/billing/flux-meter'
-import { createCharacterService } from './services/characters'
-import { createChatService } from './services/chats'
-import { createConfigKVService } from './services/config-kv'
-import { createEmailService } from './services/email'
-import { createFluxService } from './services/flux'
-import { createFluxTransactionService } from './services/flux-transaction'
-import { createPostHogClient } from './services/posthog'
-import { createProviderService } from './services/providers'
-import { createRequestLogService } from './services/request-log'
-import { createStripeService } from './services/stripe'
-import { createUserDeletionService } from './services/user-deletion'
-import { ApiError, createInternalError, createUnauthorizedError } from './utils/error'
+import { createVoicePackRoutes } from './routes/voice-packs'
+import { createConfigKVService } from './services/adapters/config-kv'
+import { createEmailService } from './services/adapters/email'
+import { createAdminFluxGrantsService } from './services/domain/admin/flux-grants'
+import { createAdminRouterConfigService } from './services/domain/admin/router-config'
+import { createAdminUsersService } from './services/domain/admin/users'
+import { createBillingService } from './services/domain/billing/billing-service'
+import { createFluxMeter } from './services/domain/billing/flux-meter'
+import { createCharacterService } from './services/domain/characters'
+import { createChatService } from './services/domain/chats'
+import { createFluxService } from './services/domain/flux'
+import { createFluxTransactionService } from './services/domain/flux-transaction'
+import { createConcurrencyLedger, createConfigSyncSubscriber, createLlmRouterService } from './services/domain/llm-router'
+import { createProductEventService } from './services/domain/product-events'
+import { createProviderService } from './services/domain/providers'
+import { createRequestLogService } from './services/domain/request-log'
+import { createStripeService } from './services/domain/stripe'
+import { createUserDeletionService } from './services/domain/user-deletion'
+import { createVoicePackService } from './services/domain/voice-packs'
+import { createEnvelopeCrypto } from './utils/envelope-crypto'
+import { ApiError, createInternalError } from './utils/error'
 import { nanoid } from './utils/id'
 import { getTrustedOrigin } from './utils/origin'
 
@@ -81,14 +102,19 @@ interface AppDeps {
   stripeService: StripeService
   billingService: BillingService
   adminFluxGrantsService: AdminFluxGrantsService
+  adminRouterConfigService: AdminRouterConfigService
+  adminUsersService: AdminUsersService
   ttsMeter: FluxMeter
   requestLogService: RequestLogService
+  voicePackService: VoicePackService
+  productEventService: ProductEventService
   configKV: ConfigKVService
+  envelopeCrypto: EnvelopeCrypto
   redis: Redis
   env: Env
   otel: OtelInstance | null
   userDeletionService: UserDeletionService
-  posthog: PostHog | null
+  llmRouter: LlmRouterService
 }
 
 export async function buildApp(deps: AppDeps) {
@@ -118,16 +144,16 @@ export async function buildApp(deps: AppDeps) {
     // @hono/otel records `http.server.request.duration` and
     // `http.server.active_requests` with the matched Hono route pattern
     // (auto-instrumentation can't see Hono's router, so it would emit empty
-    // `http.route` and concrete URLs — the previous Latency-by-Route bug).
+    // `http.route` and concrete URLs, the previous Latency-by-Route bug).
     //
-    // /health is Railway's healthcheck pinger — high frequency, zero signal,
-    // skip outright.
+    // K8s-style probes are high-frequency and zero-signal for product
+    // metrics; skip outright so they don't pollute http.* dashboards.
     const otelMw = httpInstrumentationMiddleware({
       serviceName: deps.env.OTEL_SERVICE_NAME,
       serviceVersion: process.env.npm_package_version || '0.0.0',
     })
     app.use('*', async (c, next) => {
-      if (c.req.path === '/health')
+      if (c.req.path === '/livez' || c.req.path === '/readyz')
         return next()
       return otelMw(c, next)
     })
@@ -144,30 +170,94 @@ export async function buildApp(deps: AppDeps) {
 
   app.get('/ws/chat', upgradeWebSocket(async (c) => {
     const token = c.req.query('token')
-    if (!token) {
-      throw createUnauthorizedError('Missing token')
-    }
+    if (!token)
+      return createUnauthorizedWsEvents()
+
     const session = await resolveRequestAuth(
       deps.auth,
       deps.env,
       new Headers({ Authorization: `Bearer ${token}` }),
     )
-    if (!session?.user) {
-      throw createUnauthorizedError('Invalid token')
-    }
+    if (!session?.user)
+      return createUnauthorizedWsEvents()
+
     return chatWsSetup(session.user.id)
   }))
+
+  // Bidirectional streaming TTS proxy. The handler factory builds one ws-to-ws
+  // bridge per connection: client ↔ apps/server ↔ unspeech ↔ upstream
+  // (Volcengine bidirection etc.). Auth via ?token= mirrors /ws/chat —
+  // browsers can't set Authorization headers on WebSocket constructors.
+  const audioSpeechWsSetup = createAudioSpeechWsHandlers({
+    configKV: deps.configKV,
+    envelopeCrypto: deps.envelopeCrypto,
+    fluxService: deps.fluxService,
+    ttsMeter: deps.ttsMeter,
+    requestLogService: deps.requestLogService,
+    productEventService: deps.productEventService,
+  })
+  app.get('/api/v1/audio/speech/ws', upgradeWebSocket(async (c) => {
+    const token = c.req.query('token')
+    if (!token)
+      return createUnauthorizedWsEvents()
+
+    const session = await resolveRequestAuth(
+      deps.auth,
+      deps.env,
+      new Headers({ Authorization: `Bearer ${token}` }),
+    )
+    if (!session?.user)
+      return createUnauthorizedWsEvents()
+
+    return audioSpeechWsSetup(session.user.id, {
+      trigger: c.req.query('tts_trigger') === 'auto' ? 'auto' : 'manual',
+      source: parseTtsSource(c.req.query('tts_source'), 'audio.speech.ws'),
+    })
+  }))
+
+  // Cross-instance config invalidation. The subscriber owns its own
+  // connection + lifecycle metrics; see services/llm-router/config-sync-subscriber.ts.
+  createConfigSyncSubscriber({
+    redis: deps.redis,
+    llmRouter: deps.llmRouter,
+    gatewayMetrics: deps.otel?.gateway ?? null,
+    instanceId: deps.env.OTEL_SERVICE_NAME,
+    logger: useLogger('config-sync').useGlobalConfig(),
+  })
+
+  // Built once so the OpenAI-compat and audio routers share the same closure
+  // (helpers like recordMetrics / recordRequestLog cross both surfaces) but
+  // mount at different prefixes — see the `.route` calls below.
+  const v1Routes = createV1Routes({
+    fluxService: deps.fluxService,
+    billingService: deps.billingService,
+    configKV: deps.configKV,
+    requestLogService: deps.requestLogService,
+    productEventService: deps.productEventService,
+    ttsMeter: deps.ttsMeter,
+    llmRouter: deps.llmRouter,
+    voicePackService: deps.voicePackService,
+    genAi: deps.otel?.genAi,
+    revenue: deps.otel?.revenue,
+    rateLimitMetrics: deps.otel?.rateLimit,
+  })
 
   const builtApp = app
     .use('*', sessionMiddleware(deps.auth, deps.env))
     .use('*', bodyLimit({ maxSize: 1024 * 1024 }))
     .onError((err, c) => {
       if (err instanceof ApiError) {
+        // Surface details + cause to the server-side log only. SEC-5 keeps
+        // upstream body content (carried by `cause`) out of the client
+        // response body; the logger / OTel pipeline is the right channel
+        // for operators to see the real upstream message.
+        const logFields = { details: err.details, cause: (err as { cause?: unknown }).cause }
+
         if (err.statusCode >= 500) {
-          logger.withError(err).error('API error occurred')
+          logger.withError(err).withFields(logFields).error('API error occurred')
         }
         else if (err.statusCode !== 401) {
-          logger.withError(err).warn('API error occurred')
+          logger.withError(err).withFields(logFields).warn('API error occurred')
         }
 
         return c.json({
@@ -186,9 +276,38 @@ export async function buildApp(deps: AppDeps) {
     })
 
     /**
-     * Health check route.
+     * Liveness probe (K8s convention). Returns 200 as long as the Node
+     * process is alive. Must not touch Postgres, Redis, or any external
+     * dependency: a single upstream blip should NOT cause Railway to
+     * recycle the pod (R13/R14).
      */
-    .on('GET', '/health', c => c.json({ status: 'ok' }))
+    .on('GET', '/livez', c => c.json({ status: 'live' }))
+    /**
+     * Readiness probe (K8s convention). Verifies the instance can serve
+     * traffic by pinging Postgres + Redis (the only two infra dependencies
+     * that, if down, mean we genuinely can't serve). Gateway-internal key
+     * health is intentionally NOT checked (R14): one bad upstream key
+     * must not pull the whole instance out of the load balancer pool.
+     */
+    .on('GET', '/readyz', async (c) => {
+      // Run both checks in parallel and let either fail independently.
+      const [dbResult, redisResult] = await Promise.allSettled([
+        deps.db.execute('SELECT 1'),
+        deps.redis.ping(),
+      ])
+
+      const dbReady = dbResult.status === 'fulfilled'
+      const redisReady = redisResult.status === 'fulfilled'
+      const ready = dbReady && redisReady
+
+      return c.json(
+        {
+          status: ready ? 'ready' : 'not_ready',
+          checks: { db: dbReady ? 'ok' : 'fail', redis: redisReady ? 'ok' : 'fail' },
+        },
+        ready ? 200 : 503,
+      )
+    })
 
     /**
      * Service identity at the API root. Visitors who land here from a stray
@@ -215,6 +334,12 @@ export async function buildApp(deps: AppDeps) {
     }))
 
     /**
+     * Admin dashboard SPA. Auth is enforced by `/api/admin/*`; the bundle
+     * itself is public so unauthenticated users can be redirected cleanly.
+     */
+    .route('/', createAdminUiRoutes(deps.env))
+
+    /**
      * Character routes are handled by the character service.
      */
     .route('/api/v1/characters', createCharacterRoutes(deps.characterService))
@@ -225,14 +350,23 @@ export async function buildApp(deps: AppDeps) {
     .route('/api/v1/providers', createProviderRoutes(deps.providerService))
 
     /**
+     * Voice Pack routes expose the enabled curated library for binding.
+     */
+    .route('/api/v1/voice-packs', createVoicePackRoutes(deps.voicePackService))
+
+    /**
      * Chat routes are handled by the chat service.
      */
     .route('/api/v1/chats', createChatRoutes(deps.chatService))
 
     /**
-     * V1 routes for official provider.
+     * V1 OpenAI-compatible and audio routes. The factory returns two
+     * sibling routers because the audio surface deliberately lives outside
+     * `/openai/` — its `/voices`, `/voices/streaming`, and `/models`
+     * extensions aren't OpenAI public APIs.
      */
-    .route('/api/v1/openai', createV1CompletionsRoutes(deps.fluxService, deps.billingService, deps.configKV, deps.requestLogService, deps.ttsMeter, deps.redis, deps.env, deps.otel?.genAi, deps.otel?.revenue, deps.otel?.rateLimit))
+    .route('/api/v1/openai', v1Routes.openaiRoutes)
+    .route('/api/v1/audio', v1Routes.audioRoutes)
 
     /**
      * Flux routes.
@@ -242,13 +376,47 @@ export async function buildApp(deps: AppDeps) {
     /**
      * Stripe routes.
      */
-    .route('/api/v1/stripe', createStripeRoutes(deps.fluxService, deps.stripeService, deps.billingService, deps.configKV, deps.env, deps.redis, deps.otel?.revenue, deps.otel?.rateLimit, deps.posthog))
+    .route('/api/v1/stripe', createStripeRoutes(deps.fluxService, deps.stripeService, deps.billingService, deps.configKV, deps.env, deps.redis, deps.otel?.revenue, deps.otel?.rateLimit, deps.productEventService))
 
     /**
-     * Admin routes — guarded by `ADMIN_EMAILS` allowlist + verified email.
-     * v1 only includes synchronous one-shot promo flux grants.
+     * Admin routes — guarded by the `adminGuard` role check (`role === 'admin'`,
+     * better-auth `admin` plugin). v1 only includes synchronous one-shot promo
+     * flux grants.
      */
-    .route('/api/admin/flux-grants', createAdminFluxGrantsRoutes(deps.adminFluxGrantsService, deps.env))
+    .route('/api/admin/flux-grants', createAdminFluxGrantsRoutes(deps.adminFluxGrantsService))
+
+    /**
+     * Admin per-user balance override (set balance, incl. 0 for testing).
+     * Account ban/unban live under the better-auth admin plugin at
+     * `/api/auth/admin/ban-user` / `/api/auth/admin/unban-user`.
+     */
+    .route('/api/admin/users', createAdminUsersRoutes(deps.adminUsersService))
+
+    /**
+     * Admin Voice Pack curation routes.
+     */
+    .route('/api/admin/voice-packs', createAdminVoicePackRoutes({
+      productEventService: deps.productEventService,
+      service: deps.voicePackService,
+    }))
+
+    /**
+     * Admin LLM router config seeding/patching. Single entry point for
+     * writing `LLM_ROUTER_CONFIG`, `UNSPEECH_UPSTREAM`, and the
+     * `DEFAULT_{CHAT,TTS}_MODEL` aliases — see
+     * `routes/admin/config/router/index.ts` for the body shape.
+     */
+    .route('/api/admin/config/router', createAdminRouterConfigRoutes(deps.adminRouterConfigService))
+
+    /**
+     * Admin dashboard support APIs: user search, balance adjustments, metrics,
+     * and editable LLM router config.
+     */
+    .route('/api/admin', createAdminRoutes({
+      db: deps.db,
+      billingService: deps.billingService,
+      configKV: deps.configKV,
+    }))
 
     /**
      * Catch-all 404 in JSON. Replaces hono's default `text/html` "404 Not
@@ -262,6 +430,20 @@ export async function buildApp(deps: AppDeps) {
     }, 404))
 
   return { app: builtApp, injectWebSocket }
+}
+
+function parseTtsSource(
+  value: string | undefined,
+  fallback: 'audio.speech.ws',
+): 'audio.speech.ws' | 'chat_auto_tts' | 'manual_preview' | 'settings_test' {
+  switch (value) {
+    case 'chat_auto_tts':
+    case 'manual_preview':
+    case 'settings_test':
+      return value
+    default:
+      return fallback
+  }
 }
 
 export type AppType = Awaited<ReturnType<typeof buildApp>>['app']
@@ -356,42 +538,9 @@ export async function createApp() {
     }, undefined, dependsOn.otel?.email),
   })
 
-  // Webhook capture path goes through `captureSafe` → `captureImmediate`,
-  // which awaits the HTTP send inline, so individual events never sit in
-  // the background queue. `flush()` + `_shutdown()` on SIGTERM is the belt-
-  // and-suspenders drain for any future call site that uses the regular
-  // `capture()` (which only enqueues).
-  //
-  // NOTICE:
-  // We use the underscore-prefixed `_shutdown` despite its "internal" naming
-  // because the public `shutdown(timeoutMs)` returns void (`types.d.ts:580`)
-  // — there is no way to await its completion. `_shutdown(timeoutMs)` returns
-  // `Promise<void>` (`client.d.ts:934`) and is the only way to ensure the
-  // process doesn't exit while PostHog cleanup is still running. Posthog's
-  // own examples show `await client._shutdown()` as the recommended pattern.
-  const posthog = injeca.provide('services:posthog', {
-    dependsOn: { env: parsedEnv, lifecycle },
-    build: ({ dependsOn }) => {
-      const client = createPostHogClient(dependsOn.env)
-      if (client) {
-        dependsOn.lifecycle.appHooks.onStop(async () => {
-          try {
-            await client.flush()
-          }
-          catch {
-            // Flush failures on shutdown are non-fatal; we lose at most a
-            // few queued events. Fall through to shutdown anyway.
-          }
-          try {
-            await client._shutdown(5000)
-          }
-          catch {
-            // Shutdown errors are also non-fatal during process exit.
-          }
-        })
-      }
-      return client
-    },
+  const productEventService = injeca.provide('services:productEvents', {
+    dependsOn: { db, otel },
+    build: ({ dependsOn }) => createProductEventService(dependsOn.db, dependsOn.otel?.product),
   })
 
   const characterService = injeca.provide('services:characters', {
@@ -405,8 +554,8 @@ export async function createApp() {
   })
 
   const chatService = injeca.provide('services:chats', {
-    dependsOn: { db, otel },
-    build: ({ dependsOn }) => createChatService(dependsOn.db, dependsOn.otel?.engagement),
+    dependsOn: { db, otel, productEventService },
+    build: ({ dependsOn }) => createChatService(dependsOn.db, dependsOn.otel?.engagement, dependsOn.productEventService),
   })
 
   const stripeService = injeca.provide('services:stripe', {
@@ -454,7 +603,7 @@ export async function createApp() {
   })
 
   const auth = injeca.provide('services:auth', {
-    dependsOn: { db, env: parsedEnv, otel, email: emailService, userDeletionService },
+    dependsOn: { db, env: parsedEnv, otel, email: emailService, userDeletionService, productEventService },
     build: async ({ dependsOn }) => {
       // Seed trusted OIDC clients into DB so FK constraints on oauth_access_token are satisfied
       await seedTrustedClients(dependsOn.db, dependsOn.env)
@@ -467,13 +616,18 @@ export async function createApp() {
           redirectUris: client.redirectUris.join(', '),
         }).log('OIDC trusted client ready')
       }
-      return createAuth(dependsOn.db, dependsOn.env, dependsOn.email, dependsOn.otel?.auth, dependsOn.userDeletionService)
+      return createAuth(dependsOn.db, dependsOn.env, dependsOn.email, dependsOn.otel?.auth, dependsOn.userDeletionService, dependsOn.productEventService)
     },
   })
 
   const requestLogService = injeca.provide('services:requestLog', {
     dependsOn: { db },
     build: ({ dependsOn }) => createRequestLogService(dependsOn.db),
+  })
+
+  const voicePackService = injeca.provide('services:voicePack', {
+    dependsOn: { db },
+    build: ({ dependsOn }) => createVoicePackService(dependsOn.db),
   })
 
   const billingService = injeca.provide('services:billing', {
@@ -484,6 +638,16 @@ export async function createApp() {
   const adminFluxGrantsService = injeca.provide('services:adminFluxGrants', {
     dependsOn: { db, billingService },
     build: ({ dependsOn }) => createAdminFluxGrantsService({
+      db: dependsOn.db,
+      billingService: dependsOn.billingService,
+    }),
+  })
+
+  // Per-user admin operations (balance override). Delegates the balance write
+  // to billingService.setFlux so the ledger stays single-sourced.
+  const adminUsersService = injeca.provide('services:adminUsers', {
+    dependsOn: { db, billingService },
+    build: ({ dependsOn }) => createAdminUsersService({
       db: dependsOn.db,
       billingService: dependsOn.billingService,
     }),
@@ -507,6 +671,50 @@ export async function createApp() {
     }, dependsOn.otel?.revenue),
   })
 
+  // Envelope crypto for at-rest upstream key decryption. Shared by the LLM
+  // router (HTTP chat / TTS) and the audio-speech-ws proxy (streaming TTS)
+  // so a single master-key change rotates every surface at once.
+  const envelopeCrypto = injeca.provide('libs:envelopeCrypto', {
+    dependsOn: { env: parsedEnv },
+    build: ({ dependsOn }) => createEnvelopeCrypto({
+      masterKey: dependsOn.env.LLM_ROUTER_MASTER_KEY,
+      previousMasterKey: dependsOn.env.LLM_ROUTER_MASTER_KEY_PREVIOUS,
+    }),
+  })
+
+  // Admin router-config seeding service. Reuses the shared envelope crypto
+  // so written ciphertexts decrypt cleanly under the same master key the
+  // gateway already uses. Mounted at POST /api/admin/config/router.
+  const adminRouterConfigService = injeca.provide('services:adminRouterConfig', {
+    dependsOn: { configKV, envelopeCrypto, redis },
+    build: ({ dependsOn }) => createAdminRouterConfigService({
+      configKV: dependsOn.configKV,
+      envelope: dependsOn.envelopeCrypto,
+      redis: dependsOn.redis,
+    }),
+  })
+
+  // LLM router (KTD-5 in-process replacement for the knoway sidecar).
+  // LLM_ROUTER_MASTER_KEY is required at env-parse time, so this provider
+  // always builds a real router — the legacy `null` fallback path is gone.
+  // Shared by the TTS router (acquires slots) and the pool watermark gauge
+  // (reads the snapshot). Cluster-wide Redis state — the server is multi-instance.
+  const ttsConcurrencyLedger = injeca.provide('services:ttsConcurrencyLedger', {
+    dependsOn: { redis },
+    build: ({ dependsOn }) => createConcurrencyLedger(dependsOn.redis),
+  })
+
+  const llmRouter = injeca.provide('services:llmRouter', {
+    dependsOn: { configKV, envelopeCrypto, otel, redis, ttsConcurrencyLedger },
+    build: ({ dependsOn }) => createLlmRouterService({
+      configKV: dependsOn.configKV,
+      envelopeCrypto: dependsOn.envelopeCrypto,
+      gatewayMetrics: dependsOn.otel?.gateway ?? null,
+      redis: dependsOn.redis,
+      concurrencyLedger: dependsOn.ttsConcurrencyLedger,
+    }),
+  })
+
   await injeca.start()
   const resolved = await injeca.resolve({
     db,
@@ -517,20 +725,27 @@ export async function createApp() {
     fluxService,
     fluxTransactionService,
     requestLogService,
+    voicePackService,
+    productEventService,
     stripeService,
     billingService,
     adminFluxGrantsService,
+    adminRouterConfigService,
+    adminUsersService,
     ttsMeter,
     configKV,
+    envelopeCrypto,
     redis,
     env: parsedEnv,
     otel,
     userDeletionService,
-    posthog,
+    llmRouter,
+    ttsConcurrencyLedger,
   })
   // Register the cluster-wide ObservableGauges for sessions / users. Each
-  // replica polls the same DB (cached 10s, in-flight coalesced); dashboards
-  // aggregate with avg(), not sum(). See observability-conventions.md.
+  // replica polls the same DB (cached inside each gauge, in-flight coalesced);
+  // dashboards aggregate with avg()/max(), not sum(). See
+  // observability-conventions.md.
   //
   // Both gauges share the same `session` table: `user.active_sessions` is
   // `COUNT(*)` (row inflation prone), `user.distinct_active` is
@@ -538,8 +753,11 @@ export async function createApp() {
   // surfaces session-row leakage from missing GC + per-OIDC-token row
   // creation.
   if (resolved.otel) {
+    registerTotalUsersGauge(resolved.otel.auth.totalUsers, resolved.db, resolved.otel.observability.metricReadErrors)
     registerActiveSessionsGauge(resolved.otel.auth.activeSessions, resolved.db, resolved.otel.observability.metricReadErrors)
     registerDistinctActiveUsersGauge(resolved.otel.auth.distinctActiveUsers, resolved.db, resolved.otel.observability.metricReadErrors)
+    registerRollingActiveUsersGauge(resolved.otel.auth.rollingActiveUsers, resolved.db, resolved.otel.observability.metricReadErrors)
+    registerTtsPoolGauge(resolved.otel.gateway.poolInflight, resolved.ttsConcurrencyLedger, resolved.otel.observability.metricReadErrors)
   }
 
   const { app, injectWebSocket } = await buildApp({
@@ -551,16 +769,21 @@ export async function createApp() {
     fluxService: resolved.fluxService,
     fluxTransactionService: resolved.fluxTransactionService,
     stripeService: resolved.stripeService,
+    voicePackService: resolved.voicePackService,
     billingService: resolved.billingService,
     adminFluxGrantsService: resolved.adminFluxGrantsService,
+    adminRouterConfigService: resolved.adminRouterConfigService,
+    adminUsersService: resolved.adminUsersService,
     ttsMeter: resolved.ttsMeter,
     requestLogService: resolved.requestLogService,
+    productEventService: resolved.productEventService,
     configKV: resolved.configKV,
+    envelopeCrypto: resolved.envelopeCrypto,
     redis: resolved.redis,
     env: resolved.env,
     otel: resolved.otel,
     userDeletionService: resolved.userDeletionService,
-    posthog: resolved.posthog,
+    llmRouter: resolved.llmRouter,
   })
 
   logger.withFields({ hostname: resolved.env.HOST, port: resolved.env.PORT }).log('Server started')

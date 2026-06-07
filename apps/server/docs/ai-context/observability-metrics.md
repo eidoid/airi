@@ -30,7 +30,7 @@ OTel SDK 在导出到 Prometheus 时做两件事：
 >
 > **STABLE-only**：[instrumentation.ts](../../instrumentation.ts) 把 `OTEL_SEMCONV_STABILITY_OPT_IN=http` 提前注入。OLD 系列（`http.server.duration` in ms）不再发射。详见 [`observability-conventions.md` 的 SemconvStability 章节](./observability-conventions.md#semconvstability-迁移说明)。
 >
-> `/health` 路径在 [app.ts](../../src/app.ts) 的 @hono/otel 包装层被显式 skip，Railway 健康检查不进 metric。
+> `/livez` 和 `/readyz` 在 [app.ts](../../src/app.ts) 的 @hono/otel 包装层被显式 skip，K8s 风格探针不进 metric。
 
 ## Auth & Users
 
@@ -52,13 +52,21 @@ OTel SDK 在导出到 Prometheus 时做两件事：
 
 | Metric | 类型 | 落点 | Labels |
 |---|---|---|---|
-| `chat.messages` | Counter | [services/chats.ts](../../src/services/chats.ts) `pushMessages` | — |
-| `character.created` | Counter | [services/characters.ts](../../src/services/characters.ts) | — |
+| `chat.messages` | Counter | [services/domain/chats.ts](../../src/services/domain/chats.ts) `pushMessages` | — |
+| `character.created` | Counter | [services/domain/characters.ts](../../src/services/domain/characters.ts) | — |
 | `character.deleted` | Counter | 同上 | — |
 | `character.engagement` | Counter | 同上（like/bookmark） | `action`（`like` / `unlike` / `bookmark` / `unbookmark`） |
 | `ws.connections.active` | ObservableGauge | [routes/chat-ws/index.ts](../../src/routes/chat-ws/index.ts) `addCallback` walks `userConnections` Map | — |
 | `ws.messages.sent` | Counter | 同上 | — |
-| `ws.messages.received` | Counter | [services/chats.ts](../../src/services/chats.ts) | — |
+| `ws.messages.received` | Counter | [services/domain/chats.ts](../../src/services/domain/chats.ts) | — |
+
+## Product Analytics
+
+| Metric | 类型 | 落点 | Labels |
+|---|---|---|---|
+| `airi.product.events` | Counter | [services/domain/product-events.ts](../../src/services/domain/product-events.ts) `track` | `feature`、`action`、`status`、`source`（可选） |
+
+> **Prometheus 只看事件量，不看独立用户**：`airi.product.events` 的 labels 必须保持低基数，不能加 `user_id`、`session_id`、request id、raw error message 或 prompt。要回答"每个功能有多少独立用户"，查 Postgres `product_events`：`count(distinct user_id)`。
 
 ## Revenue & Billing
 
@@ -80,10 +88,10 @@ OTel SDK 在导出到 Prometheus 时做两件事：
 | Metric | 类型 | 落点 | Labels |
 |---|---|---|---|
 | `airi.billing.flux.consumed` | Counter | [routes/openai/v1/index.ts](../../src/routes/openai/v1/index.ts) `recordMetrics`（chat / tts） | `gen_ai.request.model`、`gen_ai.operation.name`/`airi.gen_ai.operation.kind`、`http.response.status_code` |
-| `airi.billing.flux.credited` | Counter | [services/billing/billing-service.ts](../../src/services/billing/billing-service.ts) 三条入账路径 | `source`（`stripe.checkout`/`stripe.invoice`/`promo`/`admin_grant`/...）、`type`（`credit`/`promo`） |
+| `airi.billing.flux.credited` | Counter | [services/domain/billing/billing-service.ts](../../src/services/domain/billing/billing-service.ts) 三条入账路径 | `source`（`stripe.checkout`/`stripe.invoice`/`promo`/`admin_grant`/...）、`type`（`credit`/`promo`） |
 | `airi.billing.flux.unbilled` | Counter | [routes/openai/v1/index.ts](../../src/routes/openai/v1/index.ts) streaming 路径里 `consumeFluxForLLM` 失败的 catch | `gen_ai.request.model`、`reason`（`debit_failed`）、`stage`（`streaming`） |
-| `flux.insufficient_balance` | Counter | [services/billing/billing-service.ts](../../src/services/billing/billing-service.ts) `debitFlux` | — |
-| `airi.billing.tts.chars` | Counter | [services/billing/flux-meter.ts](../../src/services/billing/flux-meter.ts) `accumulate` | `meter`（`tts`）、`model` |
+| `flux.insufficient_balance` | Counter | [services/domain/billing/billing-service.ts](../../src/services/domain/billing/billing-service.ts) `debitFlux` | — |
+| `airi.billing.tts.chars` | Counter | [services/domain/billing/flux-meter.ts](../../src/services/domain/billing/flux-meter.ts) `accumulate` | `meter`（`tts`）、`model` |
 | `airi.billing.tts.preflight_rejections` | Counter | `flux-meter.ts` `assertCanAfford` | `meter`、`reason`（`insufficient_balance`） |
 
 > **`airi.billing.flux.unbilled` 是 P0 告警金线**：流式响应已经发给用户（HTTP 200，token 已经流出），但 post-stream debit 抛错——response 路径不会因此 5xx，DB latency 也只在 catch 那一瞬间显著。HTTP / DB 告警**覆盖不到**这条静默 revenue leak。推荐 alert：`increase(airi_billing_flux_unbilled_total[5m]) > 0` 持续 > 0 立刻 page。
@@ -101,7 +109,7 @@ OTel SDK 在导出到 Prometheus 时做两件事：
 
 ## Email（Resend）
 
-来源 [services/email.ts](../../src/services/email.ts) 的 `send()` 内部 try/catch。
+来源 [services/adapters/email.ts](../../src/services/adapters/email.ts) 的 `send()` 内部 try/catch。
 
 | Metric | 类型 | Labels |
 |---|---|---|
@@ -134,12 +142,15 @@ OTel SDK 在导出到 Prometheus 时做两件事：
 
 | Row | viz | 关键 metric |
 |---|---|---|
-| Service Health | stat / gauge | `user.active_sessions`（`max()`）、`ws.connections.active`（`sum()`）、`http.server.request.duration_count`（req/s + 5xx%）、`gen_ai.client.operation.count`、`airi.email.{send,failures}` 失败率 |
-| Distribution (now) | donut | HTTP methods / LLM models / HTTP status codes — `increase([5m])` |
-| Traffic Trends | timeseries | 同 distribution 的数据 over time |
-| Latency | timeseries | `http.server.request.duration_bucket`（P95 by route）、`gen_ai.client.first_token.duration_bucket`（P95 by model） |
-| Errors / Quality | mix | 4xx/5xx stacked area、`airi.gen_ai.stream.interrupted`、`airi.rate_limit.blocked` |
-| Business | stat / gauge / donut | `airi.stripe.revenue`（by currency）、checkout conversion %、`stripe.events` 分布 |
+| Service Health | stat / gauge / heatmap | `user.total`（`max()`）、`user.active_sessions`（`avg()`）、`ws.connections.active`（`sum()`）、`http.server.request.duration_count`（req/s + 5xx%）、`gen_ai.client.operation.count` |
+| User Engagement | stat | `user.active_rolling`（DAU / WAU / MAU，`max()`） |
+| Product Analytics | stat / gauge / bargauge / timeseries | `airi.product.events`（Prom-safe event volume by `feature` / `action` / `status`；distinct users 仍查 Postgres `product_events`） |
+| HTTP | heatmap / bargauge / timeseries | `http.server.request.duration_count`（status mix、top routes、route errors）、`http.server.request.duration_bucket`（P95 by route） |
+| LLM Gateway | timeseries | `gen_ai.client.operation.count`（by model）、`gen_ai.client.first_token.duration_bucket` / `gen_ai.client.operation.duration_bucket`（TTFB + end-to-end P95） |
+| Provider Upstreams | timeseries | `gen_ai.client.operation.count` / `gen_ai.client.operation.duration_bucket` by `provider`、`airi.billing.tts.chars` |
+| LLM Tokens & Quality | stat / timeseries | `gen_ai.client.token.usage.{input,output}`、`airi.billing.flux.unbilled`、`airi.gen_ai.stream.interrupted` |
+| LLM Router Health | stat / gauge / timeseries | `airi.gen_ai.gateway.{key.exhausted,decrypt.failures,fallback.count,upstream.errors}` |
+| Business | stat / gauge | `airi.stripe.revenue`（by currency）、checkout conversion %、`stripe.events` 分布 |
 | Infrastructure (collapsed, **by `service_instance_id`**) | timeseries | `db_client_operation_duration` P95（cluster）、`db_client_connection_count`、`v8js_memory_heap_used_bytes` %、`nodejs_eventloop_delay_p99_seconds` |
 | Logs | logs | Loki，不是 Prometheus |
 

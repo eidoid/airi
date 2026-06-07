@@ -41,7 +41,6 @@ import { modelSettingsRuntimeSnapshotChannelName } from '../../shared/model-sett
 import { useChatSyncStore } from '../stores/chat-sync'
 import { useControlsIslandStore } from '../stores/controls-island'
 import { useStageWindowLifecycleStore } from '../stores/stage-window-lifecycle'
-import { useWindowStore } from '../stores/window'
 import { shouldSampleStageTransparency } from '../utils/stage-three-transparency'
 
 const controlsIslandRef = ref<InstanceType<typeof ControlsIsland>>()
@@ -121,8 +120,6 @@ const isAroundWindowBorderFor250Ms = refDebounced(isAroundWindowBorder, 250)
 
 const setIgnoreMouseEvents = useElectronEventaInvoke(electron.window.setIgnoreMouseEvents)
 
-const { live2dLookAtX, live2dLookAtY } = storeToRefs(useWindowStore())
-
 const { pause, resume } = watch(isTransparent, (transparent) => {
   shouldFadeOnCursorWithin.value = fadeOnHoverEnabled.value && !transparent
 }, { immediate: true })
@@ -166,6 +163,20 @@ const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() =
       controlsLocked: hasModel
         ? (!stageMounted.value || sceneMutationLocked.value)
         : false,
+      previewAvailable: hasModel,
+      canCapturePreview: false,
+      updatedAt: Date.now(),
+    })
+  }
+
+  if (stageModelRenderer.value === 'spine') {
+    const phase = resolveComponentStateToRuntimePhase(componentStateStage.value, { hasModel })
+
+    return createEmptyModelSettingsRuntimeSnapshot({
+      ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,
+      renderer: 'spine',
+      phase,
+      controlsLocked: hasModel ? phase !== 'mounted' : false,
       previewAvailable: hasModel,
       canCapturePreview: false,
       updatedAt: Date.now(),
@@ -431,7 +442,6 @@ watch(enabled, async (val) => {
 }, { immediate: true })
 
 onMounted(() => {
-  chatSyncStore.initialize('authority')
   if (onboardingStore.needsOnboarding) {
     openOnboarding()
   }
@@ -443,7 +453,6 @@ onUnmounted(() => {
     ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,
   })
   stopAudioInteraction()
-  chatSyncStore.dispose()
 })
 
 watch(stream, async (currentStream) => {
@@ -470,6 +479,11 @@ watch([stream, () => vadLoaded.value], async ([s, loaded]) => {
 })
 
 // Assistant caption is broadcast from Stage.vue via the same channel
+
+const cursorPosition = computed(() => ({
+  x: relativeMouseX.value,
+  y: relativeMouseY.value,
+}))
 </script>
 
 <template>
@@ -504,8 +518,8 @@ watch([stream, () => vadLoaded.value], async ([s, loaded]) => {
           v-model:state="componentStateStage"
           h-full w-full
           flex-1
+          :cursor-position="cursorPosition"
           :paused="stagePaused"
-          :focus-at="{ x: live2dLookAtX, y: live2dLookAtY }"
         />
         <HoloCoupon />
         <ControlsIsland
