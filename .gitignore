@@ -134,6 +134,6 @@ apps/stage-tamagotchi/electron.vite.config.*.mjs
 
 # Tools - Obsidian
 .obsidian/
-
+.codex
 docs/ai/context/verifications/
 .playwright-mcp/
