@@ -11,8 +11,8 @@ import {
   useElectronEventaInvoke,
   useElectronMouseAroundWindowBorder,
   useElectronMouseInElement,
-  useElectronMouseInWindow,
   useElectronRelativeMouse,
+  useElectronWindowBounds,
 } from '@proj-airi/electron-vueuse'
 import { IS_DEV } from '@proj-airi/stage-shared'
 import { useModelStore, useThreeSceneIsTransparentAtPoint } from '@proj-airi/stage-ui-three'
@@ -28,9 +28,9 @@ import { useVAD } from '@proj-airi/stage-ui/stores/ai/models/vad'
 import { useHearingSpeechInputPipeline } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
-import { refDebounced, useBroadcastChannel } from '@vueuse/core'
+import { refDebounced, useBroadcastChannel, useEventListener } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 
 import ControlsIsland from '../components/stage-islands/controls-island/index.vue'
 import ResourceStatusIsland from '../components/stage-islands/resource-status-island/index.vue'
@@ -57,12 +57,40 @@ const shouldFadeOnCursorWithin = ref(false)
 const onboardingStore = useOnboardingStore()
 const openOnboarding = useElectronEventaInvoke(electronOpenOnboarding)
 
-const { isOutside: isOutsideWindow } = useElectronMouseInWindow()
 const { isOutside } = useElectronMouseInElement(controlsIslandRef)
 const { isOutside: isOutsideStatusIsland } = useElectronMouseInElement(statusIslandRef)
 const isOutsideFor250Ms = refDebounced(isOutside, 250)
 const isOutsideStatusIslandFor250Ms = refDebounced(isOutsideStatusIsland, 250)
 const { x: relativeMouseX, y: relativeMouseY } = useElectronRelativeMouse()
+const { width: windowWidth, height: windowHeight } = useElectronWindowBounds()
+const areHoverIslandsVisible = ref(true)
+const isPointerInsideWindow = shallowRef(true)
+const hasPointerInsideWindowSignal = shallowRef(false)
+
+function markPointerInsideWindow() {
+  hasPointerInsideWindowSignal.value = true
+  isPointerInsideWindow.value = true
+}
+
+useEventListener(window, 'pointerenter', markPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointermove', markPointerInsideWindow, { passive: true })
+useEventListener(window, 'touchmove', markPointerInsideWindow, { passive: true })
+useEventListener(document, 'mouseleave', () => {
+  hasPointerInsideWindowSignal.value = true
+  isPointerInsideWindow.value = false
+}, { passive: true })
+
+const isOutsideWindow = computed(() => {
+  if (hasPointerInsideWindowSignal.value)
+    return !isPointerInsideWindow.value
+
+  return windowWidth.value <= 0
+    || windowHeight.value <= 0
+    || relativeMouseX.value < 0
+    || relativeMouseY.value < 0
+    || relativeMouseX.value > windowWidth.value
+    || relativeMouseY.value > windowHeight.value
+})
 // NOTICE: In real-world use cases of Fade on Hover feature, the cursor may move around the edge of the
 // model rapidly, causing flickering effects when checking pixel transparency strictly.
 // Here we use render-target pixel sampling to keep detection aligned with the actual render output.
@@ -116,6 +144,7 @@ const { pause, resume } = watch(isTransparent, (transparent) => {
 }, { immediate: true })
 
 const hearingDialogOpen = computed(() => controlsIslandRef.value?.hearingDialogOpen ?? false)
+const controlsExpanded = computed(() => controlsIslandRef.value?.expanded ?? false)
 
 const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() => {
   const hasModel = !!stageModelSelectedUrl.value
@@ -180,7 +209,17 @@ const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() =
   })
 })
 
-watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isOutsideWindow, isTransparent, hearingDialogOpen, fadeOnHoverEnabled, stagePaused], () => {
+watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isOutsideWindow, isTransparent, hearingDialogOpen, controlsExpanded, fadeOnHoverEnabled, stagePaused], () => {
+  const insideControls = !isOutsideFor250Ms.value || !isOutsideStatusIslandFor250Ms.value || controlsExpanded.value
+  const nearBorder = isAroundWindowBorderFor250Ms.value
+
+  if (insideControls || nearBorder || hearingDialogOpen.value || stagePaused.value) {
+    areHoverIslandsVisible.value = true
+  }
+  else {
+    areHoverIslandsVisible.value = !isOutsideWindow.value
+  }
+
   if (stagePaused.value) {
     isIgnoringMouseEvents.value = false
     shouldFadeOnCursorWithin.value = false
@@ -197,9 +236,6 @@ watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor
     pause()
     return
   }
-
-  const insideControls = !isOutsideFor250Ms.value || !isOutsideStatusIslandFor250Ms.value
-  const nearBorder = isAroundWindowBorderFor250Ms.value
 
   if (insideControls || nearBorder) {
     // Inside interactive controls or near resize border: do NOT ignore events
@@ -486,7 +522,7 @@ const cursorPosition = computed(() => ({
           'transition-opacity duration-250 ease-in-out',
         ]"
       >
-        <StatusIsland v-if="IS_DEV" ref="statusIslandRef" />
+        <StatusIsland v-if="IS_DEV" ref="statusIslandRef" :visible="areHoverIslandsVisible" />
         <ResourceStatusIsland />
         <WidgetStage
           ref="widgetStageRef"
@@ -499,6 +535,7 @@ const cursorPosition = computed(() => ({
         <HoloCoupon />
         <ControlsIsland
           ref="controlsIslandRef"
+          :visible="areHoverIslandsVisible"
         />
       </div>
     </div>
@@ -549,23 +586,6 @@ const cursorPosition = computed(() => ({
         </div>
         <div class="wall absolute bottom-0 h-8 drag-region" />
       </div>
-    </div>
-  </Transition>
-  <Transition
-    enter-active-class="transition-opacity duration-250 ease-in-out"
-    enter-from-class="opacity-50"
-    enter-to-class="opacity-100"
-    leave-active-class="transition-opacity duration-250 ease-in-out"
-    leave-from-class="opacity-100"
-    leave-to-class="opacity-50"
-  >
-    <div v-if="isAroundWindowBorderFor250Ms && !isLoading" class="pointer-events-none absolute left-0 top-0 z-999 h-full w-full">
-      <div
-        :class="[
-          'b-primary/50',
-          'h-full w-full animate-flash animate-duration-3s animate-count-infinite b-4 rounded-2xl',
-        ]"
-      />
     </div>
   </Transition>
 </template>
