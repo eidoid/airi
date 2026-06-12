@@ -74,7 +74,7 @@ in
     cd apps/stage-tamagotchi
     pnpm run build
     pnpm exec electron-builder build \
-      --dir --${if stdenvNoCC.isLinux then "linux" else "mac"} \
+      --${if stdenvNoCC.isLinux then "linux" else "mac"} dir \
       -c.electronDist="${electron.dist}" \
       -c.electronVersion="${electron.version}"
 
