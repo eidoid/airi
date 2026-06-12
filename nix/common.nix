@@ -31,6 +31,7 @@ stdenvNoCC.mkDerivation (final: {
 
   pnpmDeps = fetchPnpmDeps {
     inherit (final) pname version src;
+    inherit pnpm;
     fetcherVersion = 3;
     hash = builtins.readFile ./pnpm-deps-hash.txt;
   };
@@ -51,7 +52,10 @@ stdenvNoCC.mkDerivation (final: {
     buildPhase = ''
       runHook preBuild
 
-      pnpm run build:packages
+      # Keep the default flake build portable across NixOS machines that do not
+      # provide the Godot/.NET toolchain yet. The desktop package itself does
+      # not need the Godot sidecar workspace for the web asset cache build.
+      pnpm exec turbo run build --filter='./packages/*' --filter='!@proj-airi/stage-tamagotchi-godot'
       pnpm -F @proj-airi/stage-web run build
 
       runHook postBuild
