@@ -248,6 +248,8 @@ pages:
         listFailed: Не удалось загрузить подключенные учетные записи.
         unlinkFailed: Не удалось отвязать эту учетную запись.
         linkFailed: Не удалось запустить поток ссылок.
+        accountAlreadyLinkedToDifferentUser: Этот OAuth-аккаунт уже привязан к другому аккаунту AIRI. Выберите другой аккаунт провайдера или сначала отвяжите его от другого аккаунта AIRI.
+        oauthCallbackFailed: Не удалось подключить этот OAuth-аккаунт. Попробуйте еще раз или выберите другой аккаунт провайдера.
         lastAccount: Это единственный способ входа в систему. Установите пароль перед отсоединением.
     security:
       tab: Безопасность
@@ -680,11 +682,11 @@ pages:
               loading: Загрузка моделей...
               required: Выберите голос
           voice-pack:
-            description: Select a curated voice for the active character
-            empty: No Voice Packs available
-            error: Error loading Voice Packs
-            loading: Loading Voice Packs...
-            title: Voice Pack
+            description: Выберите голос для активного персонажа
+            empty: Нет доступных голосовых пакетов
+            error: Ошибка загрузки голосовых пакетов
+            loading: Загрузка голосовых пакетов...
+            title: Голосовой пакет
           provider-voice-selection:
             custom_model_placeholder: Введите название кастомной модели...
             custom_voice_placeholder: Введите ID кастомного голоса...
