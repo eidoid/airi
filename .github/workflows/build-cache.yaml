@@ -1,0 +1,35 @@
+name: Build and Cache Flake
+
+on:
+  push:
+    branches: [iden, iden-features]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Attic Cache
+        uses: ryanccn/attic-action@v0
+        with:
+          endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+          token: ${{ secrets.ATTIC_TOKEN }}
+          cache: ${{ secrets.ATTIC_CACHE }}
+
+      - name: Build Flake
+        run: |
+          nix build .#airi --print-build-logs
+
+      - name: Push to Attic
+        run: |
+          attic push ${{ secrets.ATTIC_CACHE }} ./result
