@@ -219,6 +219,7 @@ watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor
   else {
     areHoverIslandsVisible.value = !isOutsideWindow.value
   }
+  const isHiddenInteractionMode = !areHoverIslandsVisible.value && !insideControls && !nearBorder
 
   if (stagePaused.value) {
     isIgnoringMouseEvents.value = false
@@ -246,10 +247,12 @@ watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor
   }
   else {
     const fadeEnabled = fadeOnHoverEnabled.value
-    // Otherwise allow click-through while we fade UI based on transparency (when enabled)
-    isIgnoringMouseEvents.value = fadeEnabled
+    const shouldPassthroughMouseEvents = fadeEnabled || isHiddenInteractionMode
+    // In hidden interaction mode, let pointer, click, and wheel events reach
+    // whichever desktop window is underneath AIRI.
+    isIgnoringMouseEvents.value = shouldPassthroughMouseEvents
     shouldFadeOnCursorWithin.value = fadeEnabled && !isOutsideWindow.value && !isTransparent.value
-    setIgnoreMouseEvents([fadeEnabled, { forward: true }])
+    setIgnoreMouseEvents([shouldPassthroughMouseEvents, { forward: true }])
     if (fadeEnabled)
       resume()
     else
