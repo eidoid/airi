@@ -63,7 +63,10 @@ const isOutsideFor250Ms = refDebounced(isOutside, 250)
 const isOutsideStatusIslandFor250Ms = refDebounced(isOutsideStatusIsland, 250)
 const { x: relativeMouseX, y: relativeMouseY } = useElectronRelativeMouse()
 const { width: windowWidth, height: windowHeight } = useElectronWindowBounds()
-const areHoverIslandsVisible = ref(true)
+const areHoverIslandsVisible = ref(false)
+const isPointerInsideWindowForMenu = shallowRef(false)
+const hasPointerLeftWindowForMenu = shallowRef(false)
+const lastMenuPointerLeaveAt = shallowRef(0)
 const isPointerInsideWindow = shallowRef(true)
 const hasPointerInsideWindowSignal = shallowRef(false)
 
@@ -71,6 +74,41 @@ function markPointerInsideWindow() {
   hasPointerInsideWindowSignal.value = true
   isPointerInsideWindow.value = true
 }
+
+function markMenuPointerInsideWindow() {
+  hasPointerLeftWindowForMenu.value = false
+  isPointerInsideWindowForMenu.value = true
+}
+
+function refreshMenuPointerInsideWindow(event: PointerEvent | TouchEvent) {
+  if (hasPointerLeftWindowForMenu.value && Date.now() - lastMenuPointerLeaveAt.value < 120)
+    return
+
+  if (hasPointerLeftWindowForMenu.value && event instanceof PointerEvent) {
+    const isInsideViewport = event.clientX >= 0
+      && event.clientY >= 0
+      && event.clientX <= window.innerWidth
+      && event.clientY <= window.innerHeight
+
+    if (!isInsideViewport)
+      return
+  }
+
+  hasPointerLeftWindowForMenu.value = false
+  isPointerInsideWindowForMenu.value = true
+}
+
+function markMenuPointerOutsideWindow() {
+  lastMenuPointerLeaveAt.value = Date.now()
+  hasPointerLeftWindowForMenu.value = true
+  isPointerInsideWindowForMenu.value = false
+}
+
+useEventListener(window, 'mouseenter', markMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointerenter', markMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointermove', refreshMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'touchmove', refreshMenuPointerInsideWindow, { passive: true })
+useEventListener(document, 'mouseleave', markMenuPointerOutsideWindow, { passive: true })
 
 useEventListener(window, 'pointerenter', markPointerInsideWindow, { passive: true })
 useEventListener(window, 'pointermove', markPointerInsideWindow, { passive: true })
@@ -209,15 +247,18 @@ const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() =
   })
 })
 
-watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isOutsideWindow, isTransparent, hearingDialogOpen, controlsExpanded, fadeOnHoverEnabled, stagePaused], () => {
+watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isPointerInsideWindowForMenu, isOutsideWindow, isTransparent, hearingDialogOpen, controlsExpanded, fadeOnHoverEnabled, stagePaused], () => {
   const insideControls = !isOutsideFor250Ms.value || !isOutsideStatusIslandFor250Ms.value || controlsExpanded.value
   const nearBorder = isAroundWindowBorderFor250Ms.value
 
-  if (insideControls || nearBorder || hearingDialogOpen.value || stagePaused.value) {
+  if (hasPointerLeftWindowForMenu.value && !controlsExpanded.value && !hearingDialogOpen.value && !stagePaused.value) {
+    areHoverIslandsVisible.value = false
+  }
+  else if (insideControls || nearBorder || hearingDialogOpen.value || stagePaused.value) {
     areHoverIslandsVisible.value = true
   }
   else {
-    areHoverIslandsVisible.value = !isOutsideWindow.value
+    areHoverIslandsVisible.value = isPointerInsideWindowForMenu.value
   }
 
   if (stagePaused.value) {
