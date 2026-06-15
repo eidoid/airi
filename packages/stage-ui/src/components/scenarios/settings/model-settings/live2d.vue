@@ -37,6 +37,7 @@ const {
   live2dMaxFps,
   live2dRenderScale,
   live2dForceIdleEyeAnimation,
+  live2dIdleEyeAnimationDelayMs,
 } = storeToRefs(settings)
 
 const live2d = useLive2dParams()
@@ -67,6 +68,10 @@ function isGroupActive(group: { parameters: { parameterId: string, value: number
 const selectedRuntimeMotion = ref<string>('')
 const runtimeMotions = ref<Array<{ name: string, displayPath: string, group: string, index: number }>>([])
 const canExtractColors = computed(() => props.runtimeSnapshot.canCapturePreview)
+const live2dIdleEyeAnimationDelaySeconds = computed({
+  get: () => live2dIdleEyeAnimationDelayMs.value / 1000,
+  set: value => live2dIdleEyeAnimationDelayMs.value = Math.round(value * 1000),
+})
 const runtimeMotionOptions = computed(() => {
   const options = runtimeMotions.value.map(motion => ({
     label: motion.name,
@@ -364,6 +369,15 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
       :label="t('settings.live2d.animation.force-idle-eye-animation.title')"
       :description="t('settings.live2d.animation.force-idle-eye-animation.description')"
       placement="right"
+    />
+    <FieldRange
+      v-if="live2dForceIdleEyeAnimation"
+      v-model="live2dIdleEyeAnimationDelaySeconds"
+      as="div"
+      :min="0"
+      :max="30"
+      :step="0.5"
+      :label="t('settings.live2d.animation.idle-eye-delay.title')"
     />
     <FieldCheckbox
       v-model="live2dAutoBlinkEnabled"

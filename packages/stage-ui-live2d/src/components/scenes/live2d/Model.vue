@@ -735,6 +735,8 @@ watch(focusAt, (value) => {
     return
   if (!props.eyeTracking)
     return
+  if (!props.eyeFocusSourceActive)
+    return
 
   model.value.focus(value.x, value.y)
 })

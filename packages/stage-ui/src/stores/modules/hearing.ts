@@ -13,11 +13,12 @@ import { computed, ref, shallowRef, watch } from 'vue'
 
 import vadWorkletUrl from '../../workers/vad/process.worklet?worker&url'
 
-import { useAnalytics } from '../../composables/use-analytics'
 import { activeTurnSpan, startSpan } from '../../composables/use-io-tracer'
+import { capturePosthogEvent, ensurePosthogInitialized, isPosthogAvailableInBuild } from '../analytics/posthog'
 import { useProvidersStore } from '../providers'
 import { streamAliyunTranscription } from '../providers/aliyun/stream-transcription'
 import { streamWebSpeechAPITranscription } from '../providers/web-speech-api'
+import { useSettingsAnalytics } from '../settings/analytics'
 
 function errorMessage(err: unknown): string {
   const msg = errorMessageFromValue(err)
@@ -100,6 +101,7 @@ const STREAM_TRANSCRIPTION_EXECUTORS: Record<string, StreamTranscription> = {
 
 export const useHearingStore = defineStore('hearing-store', () => {
   const providersStore = useProvidersStore()
+  const settingsAnalytics = useSettingsAnalytics()
   const { allAudioTranscriptionProvidersMetadata } = storeToRefs(providersStore)
 
   // State
@@ -195,12 +197,22 @@ export const useHearingStore = defineStore('hearing-store', () => {
     const features = providersStore.getTranscriptionFeatures(providerId)
     const streamExecutor = STREAM_TRANSCRIPTION_EXECUTORS[providerId]
 
-    const { trackSttStarted, trackSttSucceeded, trackSttFailed } = useAnalytics()
     const sttStartedAt = performance.now()
-    trackSttStarted(providerId)
+
+    function captureSttAnalytics(name: string, properties: Record<string, unknown>) {
+      if (!isPosthogAvailableInBuild() || !settingsAnalytics.analyticsEnabled)
+        return
+
+      if (!ensurePosthogInitialized(true))
+        return
+
+      capturePosthogEvent(name, properties)
+    }
+
+    captureSttAnalytics('stt_started', { provider: providerId })
 
     function emitSucceeded(charCount: number, stream: boolean) {
-      trackSttSucceeded({
+      captureSttAnalytics('stt_succeeded', {
         provider: providerId,
         latency_ms: Math.round(performance.now() - sttStartedAt),
         char_count: charCount,
@@ -208,7 +220,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
       })
     }
     function emitFailed(err: unknown) {
-      trackSttFailed({ provider: providerId, error_code: (errorMessageFrom(err) ?? 'unknown').slice(0, 64) })
+      captureSttAnalytics('stt_failed', { provider: providerId, error_code: (errorMessageFrom(err) ?? 'unknown').slice(0, 64) })
     }
 
     try {

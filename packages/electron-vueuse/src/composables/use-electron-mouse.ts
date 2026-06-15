@@ -3,12 +3,15 @@ import type { UseMouseOptions } from '@vueuse/core'
 import { defineInvoke } from '@moeru/eventa'
 import { cursorScreenPoint, startLoopGetCursorScreenPoint } from '@proj-airi/electron-eventa'
 import { useMouse } from '@vueuse/core'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 
 import { getElectronEventaContext } from './use-electron-eventa-context'
 
+export type ElectronMouseSource = 'electron' | 'niri' | 'niri-window'
+
 let sharedEventTarget: EventTarget | undefined
 let startedTracking = false
+const sharedSource = shallowRef<ElectronMouseSource>('electron')
 
 export function useElectronMouseEventTarget() {
   const context = getElectronEventaContext()
@@ -17,7 +20,9 @@ export function useElectronMouseEventTarget() {
     sharedEventTarget = new EventTarget()
 
     context.on(cursorScreenPoint, (event) => {
-      const e = new MouseEvent('mousemove', { screenX: event.body?.x, screenY: event.body?.y })
+      const body = event.body as ({ source?: ElectronMouseSource, x?: number, y?: number } | undefined)
+      sharedSource.value = body?.source ?? 'electron'
+      const e = new MouseEvent('mousemove', { screenX: body?.x, screenY: body?.y })
       sharedEventTarget?.dispatchEvent(e)
     })
   }
@@ -32,5 +37,8 @@ export function useElectronMouseEventTarget() {
 
 export function useElectronMouse(options?: UseMouseOptions) {
   const eventTarget = useElectronMouseEventTarget()
-  return useMouse({ ...options, target: eventTarget, type: 'screen' })
+  return {
+    ...useMouse({ ...options, target: eventTarget, type: 'screen' }),
+    source: sharedSource,
+  }
 }

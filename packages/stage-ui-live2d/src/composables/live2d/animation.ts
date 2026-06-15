@@ -16,6 +16,17 @@ export function useLive2DIdleEyeFocus() {
 
   // Function to handle idle eye saccades and focus (head) movements
   function update(model: InternalModel, now: number) {
+    const coreModel = model.coreModel as any
+    if (!focusTarget || now < lastSaccadeAt) {
+      focusTarget = [
+        coreModel.getParameterValueById('ParamEyeBallX') ?? 0,
+        coreModel.getParameterValueById('ParamEyeBallY') ?? 0,
+      ]
+      lastSaccadeAt = now
+      nextSaccadeAfter = now + (randomSaccadeInterval() / 1000)
+      return
+    }
+
     if (now >= nextSaccadeAfter || now < lastSaccadeAt) {
       focusTarget = [MathUtils.randFloat(-1, 1), MathUtils.randFloat(-1, 0.7)]
       lastSaccadeAt = now
@@ -24,7 +35,6 @@ export function useLive2DIdleEyeFocus() {
     }
 
     model.focusController.update(now - lastSaccadeAt)
-    const coreModel = model.coreModel as any
     // TODO: After emotion mapper, stage editor, eye related parameters should be take cared to be dynamical instead of hardcoding
     coreModel.setParameterValueById('ParamEyeBallX', MathUtils.lerp(coreModel.getParameterValueById('ParamEyeBallX'), focusTarget![0], 0.3))
     coreModel.setParameterValueById('ParamEyeBallY', MathUtils.lerp(coreModel.getParameterValueById('ParamEyeBallY'), focusTarget![1], 0.3))

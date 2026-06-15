@@ -44,6 +44,7 @@ const {
   live2dEyeTracking,
   live2dIdleAnimationEnabled,
   live2dForceIdleEyeAnimation,
+  live2dIdleEyeAnimationDelayMs,
   live2dAutoBlinkEnabled,
   live2dForceAutoBlinkEnabled,
   live2dExpressionEnabled,
@@ -61,13 +62,18 @@ const mouseFocus = useLive2DEyeFocusFor({
   source: activeCursorPosition,
 })
 
-watch(() => props.cursorPosition, (cursorPosition) => {
+watch(() => [props.cursorPosition, live2dIdleEyeAnimationDelayMs.value] as const, ([cursorPosition, idleEyeAnimationDelayMs]) => {
   activeCursorPosition.value = cursorPosition ? { ...cursorPosition } : null
-  if (clearCursorFocusTimeout)
+  if (clearCursorFocusTimeout) {
     clearTimeout(clearCursorFocusTimeout)
+    clearCursorFocusTimeout = undefined
+  }
+  if (!cursorPosition)
+    return
+
   clearCursorFocusTimeout = setTimeout(() => {
     activeCursorPosition.value = null
-  }, 1000)
+  }, Math.max(0, idleEyeAnimationDelayMs))
 })
 
 onUnmounted(() => {

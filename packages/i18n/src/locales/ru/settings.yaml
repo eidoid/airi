@@ -156,6 +156,8 @@ live2d:
     force-idle-eye-animation:
       title: Легкое движение глаз
       description: Случайно смотреть вокруг когда нет активного курсора фокуса.
+    idle-eye-delay:
+      title: Idle eye delay (seconds)
     blink-enable:
       title: Включить моргание
       description: Пусть модель моргает
