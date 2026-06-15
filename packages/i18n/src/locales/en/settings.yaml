@@ -334,6 +334,7 @@ pages:
     description: Use AIRI character card presets
     description_label: Description
     drop_here: Drop to upload
+    import_error: Could not import card
     create_card: Create a new Card
     edit_card: Edit Card
     creation:

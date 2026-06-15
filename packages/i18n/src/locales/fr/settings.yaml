@@ -320,6 +320,7 @@ pages:
     description: Utiliser les préréglages des cartes d'AIRI
     description_label: Description
     drop_here: Déposer pour téléverser
+    import_error: Impossible d'importer la carte
     create_card: Créer une nouvelle carte
     edit_card: Modifier la carte
     creation:

@@ -320,6 +320,7 @@ pages:
     description: AIRIキャラクターカードプリセットを使用する
     description_label: 説明
     drop_here: アップロードするにはここにドラッグ
+    import_error: カードをインポートできません
     create_card: 新しいカードを作成
     edit_card: カードを編集
     creation:

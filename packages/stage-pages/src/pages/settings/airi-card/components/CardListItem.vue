@@ -18,6 +18,7 @@ const emit = defineEmits<{
   (e: 'activate'): void
   (e: 'delete'): void
   (e: 'edit'): void
+  (e: 'export'): void
 }>()
 </script>
 
@@ -85,6 +86,14 @@ const emit = defineEmits<{
 
     <!-- Card actions -->
     <div flex items-center justify-end px-2 py-1.5>
+      <button
+        rounded-lg p-1.5 transition-colors hover="bg-neutral-200 dark:bg-neutral-700/50"
+        title="Export card"
+        @click.stop="emit('export')"
+      >
+        <div i-solar:download-square-linear text="neutral-500 dark:neutral-400" />
+      </button>
+
       <button
         rounded-lg p-1.5 transition-colors hover="bg-neutral-200 dark:bg-neutral-700/50"
         :disabled="isActive"

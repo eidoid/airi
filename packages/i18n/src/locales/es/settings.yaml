@@ -320,6 +320,7 @@ pages:
     description: Usar presets de tarjeta de personaje AIRI
     description_label: Descripción
     drop_here: Suelta para subir
+    import_error: No se pudo importar la tarjeta
     create_card: Crear una nueva Tarjeta
     edit_card: Modificar tarjeta
     creation:

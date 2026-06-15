@@ -2,6 +2,7 @@ import type { Card, ccv3 } from '@proj-airi/ccc'
 
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { watchDebounced } from '@vueuse/core'
+import { cloneDeep } from 'es-toolkit'
 import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
 import { computed } from 'vue'
@@ -105,6 +106,12 @@ export interface AiriCard extends Card {
   } & Card['extensions']
 }
 
+export interface AiriCardExport {
+  format: 'airi-card:v1'
+  exportedAt: string
+  card: AiriCard
+}
+
 export const useAiriCardStore = defineStore('airi-card', () => {
   const { t } = useI18n()
 
@@ -133,6 +140,22 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     const newCardId = nanoid()
     cards.value.set(newCardId, newAiriCard(card))
     return newCardId
+  }
+
+  function importCard(payload: unknown) {
+    return addCard(normalizeImportPayload(payload))
+  }
+
+  function exportCard(id: string): AiriCardExport | undefined {
+    const card = cards.value.get(id)
+    if (!card)
+      return undefined
+
+    return {
+      format: 'airi-card:v1',
+      exportedAt: new Date().toISOString(),
+      card: cloneDeep(newAiriCard(card)),
+    }
   }
 
   const removeCard = (id: string) => {
@@ -415,11 +438,45 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     cards.reset()
   }
 
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+  }
+
+  function isCharacterCardV3(value: unknown): value is ccv3.CharacterCardV3 {
+    if (!isRecord(value) || value.spec !== 'chara_card_v3' || !isRecord(value.data))
+      return false
+
+    return typeof value.data.name === 'string'
+  }
+
+  function isAiriCardExport(value: unknown): value is AiriCardExport {
+    return isRecord(value) && value.format === 'airi-card:v1' && isCardLike(value.card)
+  }
+
+  function isCardLike(value: unknown): value is Card {
+    return isRecord(value)
+      && typeof value.name === 'string'
+      && typeof value.version === 'string'
+  }
+
+  function normalizeImportPayload(payload: unknown): AiriCard | Card | ccv3.CharacterCardV3 {
+    if (isAiriCardExport(payload))
+      return payload.card
+    if (isCharacterCardV3(payload))
+      return payload
+    if (isCardLike(payload))
+      return payload
+
+    throw new Error('Unsupported AIRI card import format')
+  }
+
   return {
     cards,
     activeCard,
     activeCardId,
     addCard,
+    importCard,
+    exportCard,
     removeCard,
     updateCard,
     bindVoicePackToActiveCard,

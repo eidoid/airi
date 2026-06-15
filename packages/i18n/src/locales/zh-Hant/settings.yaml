@@ -320,6 +320,7 @@ pages:
     description: 使用 AIRI 角色卡預設
     description_label: 描述
     drop_here: 放開以上傳檔案
+    import_error: 無法匯入角色卡
     create_card: 建立新角色卡
     edit_card: 編輯卡片
     creation:
