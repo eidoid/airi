@@ -12,6 +12,8 @@ export type ElectronMouseSource = 'electron' | 'niri' | 'niri-window'
 let sharedEventTarget: EventTarget | undefined
 let startedTracking = false
 const sharedSource = shallowRef<ElectronMouseSource>('electron')
+const sharedSourceWidth = shallowRef<number>()
+const sharedSourceHeight = shallowRef<number>()
 
 export function useElectronMouseEventTarget() {
   const context = getElectronEventaContext()
@@ -20,9 +22,16 @@ export function useElectronMouseEventTarget() {
     sharedEventTarget = new EventTarget()
 
     context.on(cursorScreenPoint, (event) => {
-      const body = event.body as ({ source?: ElectronMouseSource, x?: number, y?: number } | undefined)
+      const body = event.body as ({ source?: ElectronMouseSource, x?: number, y?: number, sourceWidth?: number, sourceHeight?: number } | undefined)
       sharedSource.value = body?.source ?? 'electron'
-      const e = new MouseEvent('mousemove', { screenX: body?.x, screenY: body?.y })
+      sharedSourceWidth.value = typeof body?.sourceWidth === 'number' ? body.sourceWidth : undefined
+      sharedSourceHeight.value = typeof body?.sourceHeight === 'number' ? body.sourceHeight : undefined
+      const e = new MouseEvent('mousemove', {
+        screenX: body?.x,
+        screenY: body?.y,
+        clientX: body?.x,
+        clientY: body?.y,
+      })
       sharedEventTarget?.dispatchEvent(e)
     })
   }
@@ -40,5 +49,7 @@ export function useElectronMouse(options?: UseMouseOptions) {
   return {
     ...useMouse({ ...options, target: eventTarget, type: 'screen' }),
     source: sharedSource,
+    sourceWidth: sharedSourceWidth,
+    sourceHeight: sharedSourceHeight,
   }
 }

@@ -9,6 +9,8 @@ export interface NiriPointerMovedPoint {
   y: number
   windowX?: number
   windowY?: number
+  windowWidth?: number
+  windowHeight?: number
 }
 
 export interface NiriPointerMovedStream {
@@ -98,7 +100,14 @@ function parseNiriPointerMovedEvent(line: string, windows: Map<number, NiriWindo
       if (typeof windowPoint.x !== 'number' || typeof windowPoint.y !== 'number')
         continue
 
-      return { x, y, windowX: windowPoint.x, windowY: windowPoint.y }
+      return {
+        x,
+        y,
+        windowX: windowPoint.x,
+        windowY: windowPoint.y,
+        windowWidth: typeof windowPoint.width === 'number' ? windowPoint.width : undefined,
+        windowHeight: typeof windowPoint.height === 'number' ? windowPoint.height : undefined,
+      }
     }
   }
 

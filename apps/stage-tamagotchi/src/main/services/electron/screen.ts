@@ -23,7 +23,13 @@ export function createScreenService(params: { context: ReturnType<typeof createC
     onPointerMoved: (point) => {
       lastNiriPointerMovedAt = Date.now()
       const cursorPoint = typeof point.windowX === 'number' && typeof point.windowY === 'number'
-        ? { x: point.windowX, y: point.windowY, source: 'niri-window' as const }
+        ? {
+            x: point.windowX,
+            y: point.windowY,
+            source: 'niri-window' as const,
+            sourceWidth: point.windowWidth,
+            sourceHeight: point.windowHeight,
+          }
         : { x: point.x, y: point.y, source: 'niri' as const }
       params.context.emit(cursorScreenPoint, cursorPoint)
     },

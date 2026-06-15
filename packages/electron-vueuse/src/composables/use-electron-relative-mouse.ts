@@ -20,6 +20,23 @@ export function useElectronRelativeMouse(options?: UseMouseOptions) {
   const calibratedNiriWindowX = shallowRef<number>()
   const calibratedNiriWindowY = shallowRef<number>()
 
+  function scaleNiriWindowCoordinate(value: number, sourceSize: number | undefined, viewportSize: number | undefined) {
+    if (sourceSize === undefined || !Number.isFinite(sourceSize) || sourceSize <= 0)
+      return value
+    if (viewportSize === undefined || !Number.isFinite(viewportSize) || viewportSize <= 0)
+      return value
+
+    return value * viewportSize / sourceSize
+  }
+
+  function viewportWidth() {
+    return defaultWindow?.visualViewport?.width ?? defaultWindow?.innerWidth
+  }
+
+  function viewportHeight() {
+    return defaultWindow?.visualViewport?.height ?? defaultWindow?.innerHeight
+  }
+
   // NOTICE:
   // Use renderer-local pointer coordinates once the window receives pointer input.
   // Root cause: native Wayland compositors can withhold or freeze global cursor
@@ -56,7 +73,7 @@ export function useElectronRelativeMouse(options?: UseMouseOptions) {
   // screen stream is the only available source.
   const x = computed(() => {
     if (mouse.source.value === 'niri-window')
-      return mouse.x.value
+      return scaleNiriWindowCoordinate(mouse.x.value, mouse.sourceWidth.value, viewportWidth())
 
     if (hasWindowPointer.value && isPointerInsideWindow.value)
       return windowMouse.x.value
@@ -68,7 +85,7 @@ export function useElectronRelativeMouse(options?: UseMouseOptions) {
   })
   const y = computed(() => {
     if (mouse.source.value === 'niri-window')
-      return mouse.y.value
+      return scaleNiriWindowCoordinate(mouse.y.value, mouse.sourceHeight.value, viewportHeight())
 
     if (hasWindowPointer.value && isPointerInsideWindow.value)
       return windowMouse.y.value

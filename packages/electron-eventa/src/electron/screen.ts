@@ -4,6 +4,8 @@ import { defineEventa, defineInvokeEventa } from '@moeru/eventa'
 
 export interface CursorScreenPoint extends Point {
   source?: 'electron' | 'niri' | 'niri-window'
+  sourceWidth?: number
+  sourceHeight?: number
 }
 
 export const cursorScreenPoint = defineEventa<CursorScreenPoint>('eventa:event:electron:screen:cursor-screen-point')
