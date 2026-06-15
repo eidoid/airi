@@ -1,7 +1,8 @@
 import type { ChatSessionMeta, ChatSessionRecord, ChatSessionsIndex } from '../../types/chat-session'
+import type { AiriCard } from '../modules/airi-card'
 
-import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
 // Refs the store reads through the mocked `useAuthStore` / `useAiriCardStore`.
@@ -9,6 +10,7 @@ import { nextTick, ref } from 'vue'
 const userIdRef = ref<string>('local')
 const activeCardIdRef = ref<string>('default')
 const systemPromptRef = ref<string>('')
+const activeCardRef = ref<Pick<AiriCard, 'greetings'> | undefined>(undefined)
 
 const getIndexMock = vi.fn<(uid: string) => Promise<ChatSessionsIndex | null>>()
 const saveIndexMock = vi.fn<(idx: ChatSessionsIndex) => Promise<void>>()
@@ -19,6 +21,7 @@ const getOutboxMock = vi.fn<(uid: string) => Promise<any[]>>()
 const dropOutboxForSessionMock = vi.fn<(uid: string, id: string) => Promise<void>>()
 const getTombstonesMock = vi.fn<(uid: string) => Promise<string[]>>()
 const removeTombstonesMock = vi.fn<(uid: string, ids: string[]) => Promise<void>>()
+let pinia: ReturnType<typeof createPinia>
 
 vi.mock('pinia', async () => {
   const actual = await vi.importActual<typeof import('pinia')>('pinia')
@@ -34,6 +37,7 @@ vi.mock('../auth', () => ({
 
 vi.mock('../modules/airi-card', () => ({
   useAiriCardStore: () => ({
+    activeCard: activeCardRef,
     activeCardId: activeCardIdRef,
     systemPrompt: systemPromptRef,
   }),
@@ -97,10 +101,12 @@ vi.mock('../../libs/chat-sync', () => ({
 const { useChatSessionStore } = await import('./session-store')
 
 beforeEach(() => {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   userIdRef.value = 'local'
   activeCardIdRef.value = 'default'
   systemPromptRef.value = ''
+  activeCardRef.value = undefined
 
   getIndexMock.mockReset().mockResolvedValue(null)
   saveIndexMock.mockReset().mockResolvedValue(undefined)
@@ -113,10 +119,76 @@ beforeEach(() => {
   removeTombstonesMock.mockReset().mockResolvedValue(undefined)
 })
 
+afterEach(() => {
+  disposePinia(pinia)
+})
+
 async function flushMicrotasks(rounds = 8) {
   for (let i = 0; i < rounds; i++)
     await Promise.resolve()
 }
+
+describe('chat-session-store · card greetings', () => {
+  it('seeds a new session with one random greeting from the active card', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.6)
+    activeCardRef.value = {
+      greetings: ['Hello there', 'Welcome back'],
+    }
+    systemPromptRef.value = 'system prompt'
+
+    try {
+      const store = useChatSessionStore()
+      await store.initialize()
+
+      expect(store.messages.length).toBe(2)
+      expect(store.messages[0]).toMatchObject({
+        role: 'system',
+      })
+      expect(store.messages[0]?.content).toContain('system prompt')
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        content: 'Welcome back',
+        slices: [{ type: 'text', text: 'Welcome back' }],
+        tool_results: [],
+      })
+    }
+    finally {
+      randomSpy.mockRestore()
+    }
+  })
+
+  it('reseeds a manually cleared session with a newly selected greeting', async () => {
+    const randomSpy = vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.99)
+    activeCardRef.value = {
+      greetings: ['First greeting', 'Second greeting'],
+    }
+
+    try {
+      const store = useChatSessionStore()
+      await store.initialize()
+
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        content: 'First greeting',
+      })
+
+      store.cleanupMessages()
+
+      expect(store.messages.length).toBe(2)
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        content: 'Second greeting',
+        slices: [{ type: 'text', text: 'Second greeting' }],
+        tool_results: [],
+      })
+    }
+    finally {
+      randomSpy.mockRestore()
+    }
+  })
+})
 
 describe('chat-session-store · user swap during in-flight ensureActiveSessionForCharacter', () => {
   // ROOT CAUSE:

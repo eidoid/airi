@@ -49,7 +49,7 @@ const OUTBOX_MAX_ATTEMPTS = 5
 
 export const useChatSessionStore = defineStore('chat-session', () => {
   const { userId, token: authToken } = storeToRefs(useAuthStore())
-  const { activeCardId, systemPrompt } = storeToRefs(useAiriCardStore())
+  const { activeCard, activeCardId, systemPrompt } = storeToRefs(useAiriCardStore())
 
   const activeSessionId = ref<string>('')
   const sessionMessages = ref<Record<string, ChatHistoryItem[]>>({})
@@ -176,6 +176,37 @@ export const useChatSessionStore = defineStore('chat-session', () => {
 
   function generateInitialMessage() {
     return generateInitialMessageFromPrompt(systemPrompt.value)
+  }
+
+  function getRandomGreeting() {
+    const greetings = activeCard.value?.greetings
+      ?.map(greeting => greeting.trim())
+      .filter(Boolean) ?? []
+
+    if (greetings.length === 0)
+      return undefined
+
+    return greetings[Math.floor(Math.random() * greetings.length)]
+  }
+
+  function generateGreetingMessage(content: string) {
+    return {
+      role: 'assistant',
+      content,
+      slices: [{ type: 'text', text: content }],
+      tool_results: [],
+      id: nanoid(),
+      createdAt: Date.now(),
+    } satisfies ChatHistoryItem
+  }
+
+  function generateInitialMessages() {
+    const messages: ChatHistoryItem[] = [generateInitialMessage()]
+    const greeting = getRandomGreeting()
+    if (greeting)
+      messages.push(generateGreetingMessage(greeting))
+
+    return messages
   }
 
   function ensureGeneration(sessionId: string) {
@@ -380,7 +411,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       updatedAt: now,
     }
 
-    const initialMessages = options?.messages?.length ? cloneDeep(options.messages) : [generateInitialMessage()]
+    const initialMessages = options?.messages?.length ? cloneDeep(options.messages) : generateInitialMessages()
 
     sessionMetas.value[sessionId] = meta
     replaceSessionMessages(sessionId, initialMessages, { persist: false })
@@ -780,7 +811,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
           cloudChatId: remote.id,
         }
         sessionMetas.value[remote.id] = adoptedMeta
-        sessionMessages.value[remote.id] = [generateInitialMessage()]
+        sessionMessages.value[remote.id] = generateInitialMessages()
         ensureGeneration(remote.id)
 
         if (!index.value)
@@ -1165,7 +1196,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   function ensureSession(sessionId: string) {
     ensureGeneration(sessionId)
     if (!sessionMessages.value[sessionId] || sessionMessages.value[sessionId].length === 0) {
-      replaceSessionMessages(sessionId, [generateInitialMessage()], { persist: false })
+      replaceSessionMessages(sessionId, generateInitialMessages(), { persist: false })
     }
   }
 
@@ -1242,7 +1273,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   function cleanupMessages(sessionId = activeSessionId.value) {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
-    setSessionMessages(sessionId, [generateInitialMessage()])
+    setSessionMessages(sessionId, generateInitialMessages())
   }
 
   function getAllSessions() {
