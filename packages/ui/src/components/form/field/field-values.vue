@@ -18,13 +18,17 @@ const emit = defineEmits<{
 const items = defineModel<string[]>({ required: true })
 
 function addItem() {
-  items.value.push('')
+  items.value = [...items.value, '']
   emit('add')
 }
 
 function removeItem(index: number) {
-  items.value.splice(index, 1)
+  items.value = items.value.filter((_, itemIndex) => itemIndex !== index)
   emit('remove', index)
+}
+
+function updateItem(index: number, value: string | undefined) {
+  items.value = items.value.map((item, itemIndex) => itemIndex === index ? value ?? '' : item)
 }
 </script>
 
@@ -45,21 +49,40 @@ function removeItem(index: number) {
         </div>
       </div>
 
-      <div v-auto-animate class="~ col gap-2">
+      <div v-auto-animate :class="['flex', 'flex-col', 'gap-2']">
         <div
-          v-for="(_, index) in items"
+          v-for="(item, index) in items"
           :key="index"
           :class="['w-full', 'flex', 'items-center', 'gap-2']"
         >
           <Input
-            v-model="items[index]"
+            :model-value="item"
             :placeholder="props.valuePlaceholder"
             :class="['w-90%']"
+            @update:model-value="updateItem(index, $event as string | undefined)"
           />
-          <button i-solar:minus-circle-line-duotone size="6" :class="['min-w-20px', 'w-10%', 'flex', 'text-red-500']" @click="removeItem(index)" />
+          <button
+            type="button"
+            i-solar:minus-circle-line-duotone
+            size="6"
+            :class="['min-w-20px', 'w-10%', 'flex', 'text-red-500']"
+            @click="removeItem(index)"
+          />
         </div>
 
-        <div i-solar:add-circle-line-duotone size="6" :class="['mt-2', 'w-4/5', 'text-blue-500']" @click="addItem" />
+        <button
+          type="button"
+          :aria-label="props.label"
+          :class="[
+            'mt-2 flex h-9 w-full items-center justify-center rounded-lg',
+            'border border-dashed border-blue-300 text-blue-500',
+            'transition-all duration-200 ease-in-out',
+            'hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30',
+          ]"
+          @click="addItem"
+        >
+          <div i-solar:add-circle-line-duotone size="6" />
+        </button>
       </div>
     </label>
   </div>
