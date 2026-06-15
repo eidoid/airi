@@ -55,6 +55,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   const sessionMessages = ref<Record<string, ChatHistoryItem[]>>({})
   const sessionMetas = ref<Record<string, ChatSessionMeta>>({})
   const sessionGenerations = ref<Record<string, number>>({})
+  const pendingGreetingMessage = ref<{ sessionId: string, message: ChatHistoryItem } | null>(null)
   const index = ref<ChatSessionsIndex | null>(null)
 
   const ready = ref(false)
@@ -68,6 +69,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   // previous user cannot write its index/session back into the cleared
   // state once the swap has happened.
   let ensureActiveEpoch = 0
+  let initializeGreetingSessionIds: Set<string> | null = null
 
   let persistQueue = Promise.resolve()
   const loadedSessions = new Set<string>()
@@ -201,12 +203,32 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   }
 
   function generateInitialMessages() {
-    const messages: ChatHistoryItem[] = [generateInitialMessage()]
+    return [generateInitialMessage()]
+  }
+
+  function appendGreetingMessage(sessionId: string, options?: { persist?: boolean }) {
     const greeting = getRandomGreeting()
     if (greeting)
-      messages.push(generateGreetingMessage(greeting))
+      return appendGreetingMessageFromContent(sessionId, greeting, options)
 
-    return messages
+    return undefined
+  }
+
+  function appendGreetingMessageFromContent(sessionId: string, content: string, options?: { persist?: boolean }) {
+    const message = generateGreetingMessage(content)
+    replaceSessionMessages(sessionId, [
+      ...(sessionMessages.value[sessionId] ?? []),
+      message,
+    ], options)
+    pendingGreetingMessage.value = { sessionId, message }
+    initializeGreetingSessionIds?.add(sessionId)
+    return message
+  }
+
+  function takePendingGreetingMessage() {
+    const pending = pendingGreetingMessage.value
+    pendingGreetingMessage.value = null
+    return pending
   }
 
   function ensureGeneration(sessionId: string) {
@@ -415,6 +437,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
 
     sessionMetas.value[sessionId] = meta
     replaceSessionMessages(sessionId, initialMessages, { persist: false })
+    if (!options?.messages?.length)
+      appendGreetingMessage(sessionId, { persist: false })
     loadedSessions.add(sessionId)
     ensureGeneration(sessionId)
 
@@ -430,7 +454,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       characterIndex.activeSessionId = sessionId
     index.value.characters[characterId] = characterIndex
 
-    const record: ChatSessionRecord = { meta, messages: initialMessages }
+    const record: ChatSessionRecord = { meta, messages: snapshotMessages(sessionMessages.value[sessionId] ?? initialMessages) }
     await enqueuePersist(() => chatSessionsRepo.saveSession(sessionId, record))
     await persistIndex()
 
@@ -1175,7 +1199,10 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     }
     initializing.value = true
     initializePromise = (async () => {
+      initializeGreetingSessionIds = new Set()
       await ensureActiveSessionForCharacter()
+      if (activeSessionId.value && !initializeGreetingSessionIds.has(activeSessionId.value))
+        appendGreetingMessage(activeSessionId.value)
       ready.value = true
       // Surface any outbox left over from a previous session (closed tab
       // mid-send) before the WS even opens. The drain itself runs after
@@ -1188,6 +1215,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       await initializePromise
     }
     finally {
+      initializeGreetingSessionIds = null
       initializePromise = null
       initializing.value = false
     }
@@ -1197,6 +1225,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     ensureGeneration(sessionId)
     if (!sessionMessages.value[sessionId] || sessionMessages.value[sessionId].length === 0) {
       replaceSessionMessages(sessionId, generateInitialMessages(), { persist: false })
+      appendGreetingMessage(sessionId, { persist: false })
     }
   }
 
@@ -1273,7 +1302,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   function cleanupMessages(sessionId = activeSessionId.value) {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
-    setSessionMessages(sessionId, generateInitialMessages())
+    replaceSessionMessages(sessionId, generateInitialMessages(), { persist: false })
+    appendGreetingMessage(sessionId)
   }
 
   function getAllSessions() {
@@ -1436,11 +1466,13 @@ export const useChatSessionStore = defineStore('chat-session', () => {
 
     activeSessionId,
     messages,
+    pendingGreetingMessage,
 
     setActiveSession,
     applyRemoteSnapshot,
     getSnapshot,
     cleanupMessages,
+    takePendingGreetingMessage,
     getAllSessions,
     resetAllSessions,
 

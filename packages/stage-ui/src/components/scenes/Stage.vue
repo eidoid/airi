@@ -40,6 +40,7 @@ import { createStageTtsSession } from '../../libs/speech/tts-session'
 import { useAudioContext, useSpeakingStore } from '../../stores/audio'
 import { useBackgroundStore } from '../../stores/background'
 import { useChatOrchestratorStore } from '../../stores/chat'
+import { useChatSessionStore } from '../../stores/chat/session-store'
 import { useLlmStreamingControlStore } from '../../stores/llm-streaming-control'
 import { useAiriCardStore } from '../../stores/modules'
 import { useSpeechStore, voicePackForSpeechProvider } from '../../stores/modules/speech'
@@ -94,6 +95,8 @@ const currentAudioSource = ref<AudioBufferSourceNode>()
 const { latestStopRequest } = storeToRefs(useSpeechOutputControlStore())
 
 const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = useChatOrchestratorStore()
+const chatSessionStore = useChatSessionStore()
+const { activeSessionId, pendingGreetingMessage } = storeToRefs(chatSessionStore)
 const chatHookCleanups: Array<() => void> = []
 // WORKAROUND: clear previous handlers on unmount to avoid duplicate calls when this component remounts.
 //             We keep per-hook disposers instead of wiping the global chat hooks to play nicely with
@@ -726,6 +729,60 @@ function openTtsSession(): StageTtsSession {
   return session
 }
 
+let greetingSpeechTask: Promise<void> | null = null
+
+async function speakGreetingMessage(text: string) {
+  if (!text.trim())
+    return
+
+  playbackManager.stopAll('greeting')
+  setupAnalyser()
+  await setupLipSync()
+  resetAssistantSpeechSurface('greeting')
+
+  currentSession?.cancel('greeting')
+  currentSession = openTtsSession()
+  currentSession.appendText(text)
+  currentSession.finishInput()
+  currentSession.end()
+}
+
+function maybeSpeakPendingGreeting() {
+  const pending = pendingGreetingMessage.value
+  if (!pending)
+    return
+  if (pending.sessionId !== activeSessionId.value)
+    return
+  if (componentState.value !== 'mounted')
+    return
+  if (!canSpeakGreeting())
+    return
+  if (greetingSpeechTask)
+    return
+
+  const consumed = chatSessionStore.takePendingGreetingMessage()
+  if (!consumed)
+    return
+
+  greetingSpeechTask = speakGreetingMessage(String(consumed.message.content ?? '')).finally(() => {
+    greetingSpeechTask = null
+  })
+}
+
+function canSpeakGreeting() {
+  if (!activeSpeechProvider.value || activeSpeechProvider.value === 'speech-noop')
+    return false
+
+  if (activeSpeechProvider.value === 'openai-compatible-audio-speech')
+    return true
+
+  const voicePack = activeCard.value?.extensions?.airi?.modules.speech.voicePack
+  if (voicePackForSpeechProvider(activeSpeechProvider.value, voicePack))
+    return true
+
+  return !!activeSpeechVoice.value?.id
+}
+
 watch(latestStopRequest, (request) => {
   if (!request)
     return
@@ -802,6 +859,10 @@ watch(
     currentSession = null
   },
 )
+
+watch([pendingGreetingMessage, activeSessionId, componentState, activeSpeechProvider, () => activeSpeechVoice.value?.id, activeSpeechModel], () => {
+  maybeSpeakPendingGreeting()
+}, { immediate: true })
 
 // Resume audio context on first user interaction (browser requirement)
 let audioContextResumed = false

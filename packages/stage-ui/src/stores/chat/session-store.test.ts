@@ -1,3 +1,4 @@
+import type { ChatHistoryItem } from '../../types/chat'
 import type { ChatSessionMeta, ChatSessionRecord, ChatSessionsIndex } from '../../types/chat-session'
 import type { AiriCard } from '../modules/airi-card'
 
@@ -151,6 +152,13 @@ describe('chat-session-store · card greetings', () => {
         slices: [{ type: 'text', text: 'Welcome back' }],
         tool_results: [],
       })
+      expect(store.pendingGreetingMessage).toMatchObject({
+        sessionId: store.activeSessionId,
+        message: {
+          role: 'assistant',
+          content: 'Welcome back',
+        },
+      })
     }
     finally {
       randomSpy.mockRestore()
@@ -183,6 +191,91 @@ describe('chat-session-store · card greetings', () => {
         slices: [{ type: 'text', text: 'Second greeting' }],
         tool_results: [],
       })
+      expect(store.pendingGreetingMessage).toMatchObject({
+        sessionId: store.activeSessionId,
+        message: {
+          role: 'assistant',
+          content: 'Second greeting',
+        },
+      })
+    }
+    finally {
+      randomSpy.mockRestore()
+    }
+  })
+
+  it('appends a fresh greeting to an existing active session on startup', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
+    activeCardRef.value = {
+      greetings: ['Restart hello'],
+    }
+    const meta: ChatSessionMeta = {
+      sessionId: 'sess-existing',
+      userId: 'local',
+      characterId: 'default',
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const existingMessages: ChatHistoryItem[] = [
+      { role: 'system', content: 'system', id: 'system-1', createdAt: 1 },
+      { role: 'user', content: 'previous user turn', id: 'user-1', createdAt: 2 },
+    ]
+    getIndexMock.mockResolvedValue({
+      userId: 'local',
+      characters: {
+        default: {
+          activeSessionId: 'sess-existing',
+          sessions: { 'sess-existing': meta },
+        },
+      },
+    })
+    getSessionMock.mockResolvedValue({
+      meta,
+      messages: existingMessages,
+    })
+
+    try {
+      const store = useChatSessionStore()
+      await store.initialize()
+
+      expect(store.messages.map(message => message.content)).toEqual([
+        'system',
+        'previous user turn',
+        'Restart hello',
+      ])
+      expect(store.pendingGreetingMessage).toMatchObject({
+        sessionId: 'sess-existing',
+        message: {
+          role: 'assistant',
+          content: 'Restart hello',
+        },
+      })
+    }
+    finally {
+      randomSpy.mockRestore()
+    }
+  })
+
+  it('consumes pending greeting once for speech playback', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
+    activeCardRef.value = {
+      greetings: ['Speak once'],
+    }
+
+    try {
+      const store = useChatSessionStore()
+      await store.initialize()
+
+      const pending = store.takePendingGreetingMessage()
+
+      expect(pending).toMatchObject({
+        sessionId: store.activeSessionId,
+        message: {
+          role: 'assistant',
+          content: 'Speak once',
+        },
+      })
+      expect(store.pendingGreetingMessage).toBeNull()
     }
     finally {
       randomSpy.mockRestore()
