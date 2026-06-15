@@ -71,6 +71,12 @@ export interface ExpressionToolResult {
   available?: string[]
 }
 
+interface ExpressionRegistrationSnapshot {
+  modelId: string
+  expressions: Map<string, ExpressionEntry>
+  expressionGroups: Map<string, ExpressionGroupDefinition>
+}
+
 // ---------------------------------------------------------------------------
 // Persistence helpers  (localStorage – no extra dependency needed)
 // ---------------------------------------------------------------------------
@@ -125,10 +131,13 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
   /** Per-group LLM exposure flags (only used when llmMode === 'custom'). */
   const llmExposed = ref<Map<string, boolean>>(new Map())
 
+  const activeOwnerId = ref<string>('')
+  const registrations = new Map<string, ExpressionRegistrationSnapshot>()
+
   // ---- internal helpers ----------------------------------------------------
 
-  function clearAllTimers() {
-    for (const entry of expressions.value.values()) {
+  function clearTimers(entries: Iterable<ExpressionEntry>) {
+    for (const entry of entries) {
       if (entry.resetTimer != null) {
         clearTimeout(entry.resetTimer)
         entry.resetTimer = undefined
@@ -150,6 +159,20 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
     return Array.from(expressions.value.keys())
   }
 
+  function activateRegistration(ownerId: string, snapshot: ExpressionRegistrationSnapshot) {
+    activeOwnerId.value = ownerId
+    modelId.value = snapshot.modelId
+    expressions.value = snapshot.expressions
+    expressionGroups.value = snapshot.expressionGroups
+  }
+
+  function clearActiveRegistration() {
+    activeOwnerId.value = ''
+    expressions.value = new Map()
+    expressionGroups.value = new Map()
+    modelId.value = ''
+  }
+
   // ---- public API ----------------------------------------------------------
 
   /**
@@ -160,33 +183,44 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
     id: string,
     groups: ExpressionGroupDefinition[],
     parameterEntries: ExpressionEntry[],
+    ownerId = id,
   ) {
-    clearAllTimers()
-    expressions.value = new Map()
-    expressionGroups.value = new Map()
-    modelId.value = id
+    const previous = registrations.get(ownerId)
+    if (previous)
+      clearTimers(previous.expressions.values())
+
+    const nextExpressions = new Map<string, ExpressionEntry>()
+    const nextExpressionGroups = new Map<string, ExpressionGroupDefinition>()
 
     // Register expression groups
     for (const group of groups) {
-      expressionGroups.value.set(group.name, group)
+      nextExpressionGroups.set(group.name, group)
     }
 
     // Register individual parameter entries
     for (const entry of parameterEntries) {
-      expressions.value.set(entry.name, { ...entry })
+      nextExpressions.set(entry.name, { ...entry })
     }
 
     // Restore persisted defaults
     const persisted = loadPersistedDefaults(id)
     if (persisted) {
       for (const [name, defaultVal] of Object.entries(persisted)) {
-        const entry = expressions.value.get(name)
+        const entry = nextExpressions.get(name)
         if (entry) {
           entry.defaultValue = defaultVal
           entry.currentValue = defaultVal
         }
       }
     }
+
+    const snapshot: ExpressionRegistrationSnapshot = {
+      modelId: id,
+      expressions: nextExpressions,
+      expressionGroups: nextExpressionGroups,
+    }
+    registrations.set(ownerId, snapshot)
+    activateRegistration(ownerId, snapshot)
   }
 
   /**
@@ -337,7 +371,7 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
    * Reset all expressions to their default values.
    */
   function resetAll(): ExpressionToolResult {
-    clearAllTimers()
+    clearTimers(expressions.value.values())
     const states: ExpressionState[] = []
     for (const entry of expressions.value.values()) {
       entry.currentValue = entry.modelDefault
@@ -349,13 +383,37 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
   /**
    * Full cleanup when a model is unloaded.
    */
-  function dispose() {
-    clearAllTimers()
-    expressions.value = new Map()
-    expressionGroups.value = new Map()
+  function dispose(ownerId?: string) {
+    if (!ownerId) {
+      for (const snapshot of registrations.values()) {
+        clearTimers(snapshot.expressions.values())
+      }
+      registrations.clear()
+      clearActiveRegistration()
+      llmMode.value = 'none'
+      llmExposed.value = new Map()
+      return
+    }
+
+    const snapshot = registrations.get(ownerId)
+    if (!snapshot)
+      return
+
+    clearTimers(snapshot.expressions.values())
+    registrations.delete(ownerId)
+
+    if (activeOwnerId.value !== ownerId)
+      return
+
+    const fallback = Array.from(registrations.entries()).pop()
+    if (fallback) {
+      activateRegistration(fallback[0], fallback[1])
+      return
+    }
+
+    clearActiveRegistration()
     llmMode.value = 'none'
     llmExposed.value = new Map()
-    modelId.value = ''
   }
 
   // ---- LLM exposure --------------------------------------------------------
@@ -403,6 +461,7 @@ export const useExpressionStore = defineStore('live2d-expressions', () => {
     expressions,
     modelId,
     expressionGroups,
+    activeOwnerId,
     llmMode,
     llmExposed,
 

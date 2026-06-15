@@ -5,6 +5,8 @@ import type { ModelSettingsRuntimeChannelEvent } from '../../shared/model-settin
 
 import workletUrl from '@proj-airi/stage-ui/workers/vad/process.worklet?worker&url'
 
+import { defineInvokeHandler } from '@moeru/eventa'
+import { createContext } from '@moeru/eventa/adapters/electron/renderer'
 import { tryCatch } from '@moeru/std'
 import { electron } from '@proj-airi/electron-eventa'
 import {
@@ -25,7 +27,7 @@ import { WidgetStage } from '@proj-airi/stage-ui/components/scenes'
 import { useAudioRecorder } from '@proj-airi/stage-ui/composables/audio/audio-recorder'
 import { useCanvasPixelIsTransparentAtPoint } from '@proj-airi/stage-ui/composables/canvas-alpha'
 import { useVAD } from '@proj-airi/stage-ui/stores/ai/models/vad'
-import { useHearingSpeechInputPipeline } from '@proj-airi/stage-ui/stores/modules/hearing'
+import { useHearingSpeechInputPipeline, useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { refDebounced, useBroadcastChannel, useEventListener } from '@vueuse/core'
@@ -36,7 +38,7 @@ import ControlsIsland from '../components/stage-islands/controls-island/index.vu
 import ResourceStatusIsland from '../components/stage-islands/resource-status-island/index.vue'
 import StatusIsland from '../components/stage-islands/status-island/index.vue'
 
-import { electronOpenOnboarding } from '../../shared/eventa'
+import { electronOpenOnboarding, electronRunAppAction } from '../../shared/eventa'
 import { modelSettingsRuntimeSnapshotChannelName } from '../../shared/model-settings-runtime'
 import { useChatSyncStore } from '../stores/chat-sync'
 import { useControlsIslandStore } from '../stores/controls-island'
@@ -313,6 +315,7 @@ watch(modelSettingsRuntimeChannelEvent, (event) => {
 const settingsAudioDeviceStore = useSettingsAudioDevice()
 const { stream, enabled } = storeToRefs(settingsAudioDeviceStore)
 const { askPermission } = settingsAudioDeviceStore
+const hearingStore = useHearingStore()
 const { startRecord, stopRecord, onStopRecord } = useAudioRecorder(stream)
 const hearingPipeline = useHearingSpeechInputPipeline()
 const { transcribeForRecording, transcribeForMediaStream, stopStreamingTranscription } = hearingPipeline
@@ -482,6 +485,31 @@ function stopAudioInteraction() {
   })
 }
 
+const { context: electronEventaContext } = createContext(window.electron.ipcRenderer)
+const stopRunAppActionHandler = defineInvokeHandler(electronEventaContext, electronRunAppAction, async ({ action }) => {
+  switch (action) {
+    case 'toggle-hearing-autosend': {
+      const shouldEnable = !enabled.value || !hearingStore.autoSendEnabled
+      hearingStore.autoSendEnabled = shouldEnable
+      enabled.value = shouldEnable
+
+      if (shouldEnable) {
+        await askPermission()
+        await startAudioInteraction()
+      }
+      else {
+        stopAudioInteraction()
+      }
+
+      return {
+        action,
+        hearingEnabled: enabled.value,
+        autoSendEnabled: hearingStore.autoSendEnabled,
+      }
+    }
+  }
+})
+
 watch(enabled, async (val) => {
   console.info('[Main Page] Audio enabled changed:', val, 'stream available:', !!stream.value)
   if (val) {
@@ -500,6 +528,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopRunAppActionHandler()
   postModelSettingsRuntimeChannelEvent({
     type: 'owner-gone',
     ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,

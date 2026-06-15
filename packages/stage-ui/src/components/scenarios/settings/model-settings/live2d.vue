@@ -737,7 +737,7 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
     <div v-if="!live2dExpressionEnabled" py-2 text-xs text-neutral-500 dark:text-neutral-400>
       {{ t('settings.live2d.expressions.sdk-preset-preserved-notice') }}
     </div>
-    <template v-else-if="expressionGroups.size === 0">
+    <template v-if="expressionGroups.size === 0">
       <div py-2 text-sm text-neutral-500 dark:text-neutral-400>
         {{ t('settings.live2d.expressions.no-expression') }}
       </div>
@@ -753,6 +753,7 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
           <span text-sm text-neutral-700 dark:text-neutral-300>{{ groupName }}</span>
           <Checkbox
             :model-value="isGroupActive(group)"
+            :disabled="!live2dExpressionEnabled"
             @update:model-value="expressionStore.toggle(groupName)"
           />
         </div>

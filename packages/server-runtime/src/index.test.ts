@@ -2,7 +2,7 @@ import type { WebSocketBaseEvent, WebSocketEvents } from '@proj-airi/server-shar
 
 import { describe, expect, it } from 'vitest'
 
-import { heartbeatFrameFrom, resolveEventDelivery, selectConsumerPeerId } from './index'
+import { heartbeatFrameFrom, resolveEventDelivery, selectConsumerPeerId, setupApp } from './index'
 
 function createInputTextEvent(
   overrides: Partial<WebSocketBaseEvent<'input:text', WebSocketEvents['input:text']>> = {},
@@ -193,6 +193,54 @@ describe('selectConsumerPeerId', () => {
 
     expect(firstSelectedPeerId).toBe('stage-window-a')
     expect(secondSelectedPeerId).toBe('stage-window-a')
+  })
+})
+
+describe('setupApp action route', () => {
+  it('returns 404 when actions are not registered', async () => {
+    const { app, dispose } = setupApp()
+    const response = await app.fetch(new Request('http://127.0.0.1/api/actions/toggle-hearing-autosend', {
+      method: 'POST',
+    }))
+    dispose()
+
+    expect(response.status).toBe(404)
+  })
+
+  it('rejects action requests with an invalid bearer token', async () => {
+    const { app, dispose } = setupApp({
+      auth: { token: 'secret' },
+      actions: {
+        invoke: async () => ({ ok: true }),
+      },
+    })
+    const response = await app.fetch(new Request('http://127.0.0.1/api/actions/toggle-hearing-autosend', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer wrong' },
+    }))
+    dispose()
+
+    expect(response.status).toBe(401)
+  })
+
+  it('invokes registered actions with valid bearer auth', async () => {
+    const { app, dispose } = setupApp({
+      auth: { token: 'secret' },
+      actions: {
+        invoke: async action => ({ action, hearingEnabled: true, autoSendEnabled: true }),
+      },
+    })
+    const response = await app.fetch(new Request('http://127.0.0.1/api/actions/toggle-hearing-autosend', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret' },
+    }))
+    const body = await response.json() as { ok: boolean, result: { hearingEnabled: boolean, autoSendEnabled: boolean } }
+    dispose()
+
+    expect(response.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.result.hearingEnabled).toBe(true)
+    expect(body.result.autoSendEnabled).toBe(true)
   })
 })
 

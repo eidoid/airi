@@ -32,6 +32,13 @@ export const electronOpenMainDevtools = defineInvokeEventa('eventa:invoke:electr
 export const electronOpenSettings = defineInvokeEventa<void, { route?: string }>('eventa:invoke:electron:windows:settings:open')
 export const electronSettingsNavigate = defineEventa<{ route: string }>('eventa:event:electron:windows:settings:navigate')
 export const electronOpenChat = defineInvokeEventa('eventa:invoke:electron:windows:chat:open')
+export type ElectronAppActionName = 'toggle-hearing-autosend'
+export interface ElectronRunAppActionResult {
+  action: ElectronAppActionName
+  hearingEnabled: boolean
+  autoSendEnabled: boolean
+}
+export const electronRunAppAction = defineInvokeEventa<ElectronRunAppActionResult, { action: ElectronAppActionName }>('eventa:invoke:electron:app:action:run')
 export const electronSpotlightHide = defineInvokeEventa<void>('eventa:invoke:electron:windows:spotlight:hide')
 export const electronSpotlightShowResultNotification = defineInvokeEventa<void, { body: string }>('eventa:invoke:electron:windows:spotlight:show-result-notification')
 export const electronSpotlightShortcutGet = defineInvokeEventa<ShortcutAccelerator>('eventa:invoke:electron:windows:spotlight:shortcut:get')

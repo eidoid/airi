@@ -449,8 +449,14 @@ export function useMotionUpdatePluginAutoEyeBlink(
  */
 export function useMotionUpdatePluginExpression(
   controller: ReturnType<typeof useExpressionController>,
+  live2dExpressionEnabled?: Ref<boolean>,
 ): MotionManagerPlugin {
   return (ctx) => {
+    if (live2dExpressionEnabled && !live2dExpressionEnabled.value) {
+      controller.resetAppliedExpressions(ctx.model)
+      return
+    }
+
     // Always apply regardless of handled state – expressions layer on top.
     controller.applyExpressions(ctx.model)
   }

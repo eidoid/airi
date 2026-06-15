@@ -1,3 +1,4 @@
+import type { useExpressionController } from './expression-controller'
 import type { MotionManagerPluginContext, PixiLive2DInternalModel } from './motion-manager'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -5,6 +6,7 @@ import { ref } from 'vue'
 
 import {
   useMotionUpdatePluginAutoEyeBlink,
+  useMotionUpdatePluginExpression,
   useMotionUpdatePluginIdleDisable,
 } from './motion-manager'
 
@@ -178,5 +180,24 @@ describe('live2d motion manager plugins', () => {
     expect(context.model.getParameterValueById('ParamEyeROpen')).toBe(1)
 
     randomSpy.mockRestore()
+  })
+
+  /**
+   * @example
+   * expect(controller.applyExpressions).not.toHaveBeenCalled()
+   */
+  it('keeps expression metadata loaded while expression override is disabled', () => {
+    const context = createContext()
+    const controller: ReturnType<typeof useExpressionController> = {
+      initialise: vi.fn(),
+      applyExpressions: vi.fn(),
+      resetAppliedExpressions: vi.fn(),
+      dispose: vi.fn(),
+    }
+
+    useMotionUpdatePluginExpression(controller, ref(false))(context)
+
+    expect(controller.applyExpressions).not.toHaveBeenCalled()
+    expect(controller.resetAppliedExpressions).toHaveBeenCalledWith(context.model)
   })
 })

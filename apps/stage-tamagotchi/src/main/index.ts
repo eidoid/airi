@@ -4,7 +4,9 @@ import type { FileLoggerHandle } from './app/file-logger'
 
 import process, { env, platform } from 'node:process'
 
-import { dirname } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import messages from '@proj-airi/i18n/locales'
@@ -12,6 +14,7 @@ import messages from '@proj-airi/i18n/locales'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { Format, LogLevel, setGlobalFormat, setGlobalHookPostLog, setGlobalLogLevel, useLogg } from '@guiiai/logg'
 import { createContext } from '@moeru/eventa/adapters/electron/main'
+import { errorMessageFrom } from '@moeru/std'
 import { initScreenCaptureForMain } from '@proj-airi/electron-screen-capture/main'
 import { app, ipcMain } from 'electron'
 import { noop } from 'es-toolkit'
@@ -66,6 +69,119 @@ const log = useLogg('main').useGlobalConfig()
 const appUserDataPath = env.APP_USER_DATA_PATH?.trim()
 if (appUserDataPath) {
   app.setPath('userData', appUserDataPath)
+}
+
+type StartupCliAction = 'toggle-hearing-autosend'
+
+function parseStartupCliAction(argv: string[]): StartupCliAction | undefined {
+  const commandIndex = argv.findIndex(arg => arg === 'msg')
+  if (commandIndex === -1)
+    return undefined
+
+  const kind = argv[commandIndex + 1]
+  const action = argv[commandIndex + 2]
+  if (kind === 'action' && action === 'toggle-hearing-autosend')
+    return action
+
+  return undefined
+}
+
+function readStartupCliAuthToken() {
+  for (const userDataDir of getStartupCliCandidateUserDataDirs()) {
+    for (const configPath of getStartupCliServerChannelConfigPaths(userDataDir)) {
+      const token = readStartupCliAuthTokenFromConfig(configPath)
+      if (token)
+        return token
+    }
+  }
+
+  return ''
+}
+
+function getStartupCliCandidateUserDataDirs() {
+  const dirs = [
+    env.AIRI_USER_DATA_PATH?.trim(),
+    env.APP_USER_DATA_PATH?.trim(),
+    app.getPath('userData'),
+    ...getPlatformUserDataDirs(),
+  ].filter((dir): dir is string => Boolean(dir))
+
+  return Array.from(new Set(dirs))
+}
+
+function getPlatformUserDataDirs() {
+  const home = env.HOME || homedir()
+  const appIds = ['ai.moeru.airi', '@proj-airi/stage-tamagotchi', 'AIRI']
+
+  if (platform === 'win32') {
+    const appData = env.APPDATA
+    return appData ? appIds.map(appId => join(appData, appId)) : []
+  }
+
+  if (platform === 'darwin') {
+    return appIds.map(appId => join(home, 'Library', 'Application Support', appId))
+  }
+
+  const configHome = env.XDG_CONFIG_HOME || join(home, '.config')
+  return appIds.map(appId => join(configHome, appId))
+}
+
+function getStartupCliServerChannelConfigPaths(userDataDir: string) {
+  return [
+    join(userDataDir, 'server-channel-config.json'),
+    join(userDataDir, 'server-channel', 'config.json'),
+  ]
+}
+
+function readStartupCliAuthTokenFromConfig(configPath: string) {
+  if (!existsSync(configPath))
+    return ''
+
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8')) as unknown
+    if (!raw || typeof raw !== 'object' || !('authToken' in raw))
+      return ''
+
+    const authToken = raw.authToken
+    return typeof authToken === 'string' ? authToken.trim() : ''
+  }
+  catch {
+    return ''
+  }
+}
+
+async function runStartupCliAction(action: StartupCliAction) {
+  const port = env.SERVER_CHANNEL_PORT ? Number.parseInt(env.SERVER_CHANNEL_PORT, 10) : 6121
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    console.error(`Invalid SERVER_CHANNEL_PORT: ${env.SERVER_CHANNEL_PORT}`)
+    return 1
+  }
+
+  const authToken = env.AIRI_SERVER_AUTH_TOKEN?.trim() || readStartupCliAuthToken()
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/actions/${action}`, {
+      method: 'POST',
+      headers: {
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action }),
+    })
+    const body = await response.text()
+    if (body)
+      console.info(body)
+    return response.ok ? 0 : 1
+  }
+  catch (error) {
+    console.error(errorMessageFrom(error) ?? 'Failed to send AIRI action to the running instance.')
+    return 1
+  }
+}
+
+const startupCliAction = parseStartupCliAction(process.argv)
+if (startupCliAction) {
+  runStartupCliAction(startupCliAction).then(code => process.exit(code))
 }
 
 // Thanks to [@blurymind](https://github.com/blurymind),

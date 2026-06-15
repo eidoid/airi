@@ -11,11 +11,11 @@ import type { OnboardingWindowManager } from '../../onboarding'
 import type { SettingsWindowManager } from '../../settings'
 import type { WidgetsWindowManager } from '../../widgets'
 
-import { defineInvokeHandler } from '@moeru/eventa'
+import { defineInvoke, defineInvokeHandler } from '@moeru/eventa'
 import { createContext } from '@moeru/eventa/adapters/electron/main'
 import { ipcMain } from 'electron'
 
-import { electronOpenChat, electronOpenMainDevtools, electronOpenSettings, noticeWindowEventa } from '../../../../shared/eventa'
+import { electronOpenChat, electronOpenMainDevtools, electronOpenSettings, electronRunAppAction, noticeWindowEventa } from '../../../../shared/eventa'
 import { createAuthService } from '../../../services/airi/auth'
 import { createGodotStageService } from '../../../services/airi/godot-stage'
 import { createMcpServersService } from '../../../services/airi/mcp-servers'
@@ -53,6 +53,8 @@ export async function setupMainWindowElectronInvokes(params: {
   createGodotStageService({ context, manager: params.godotStageManager, window: params.window })
   createOnboardingService({ context, onboardingWindowManager: params.onboardingWindowManager, mainWindow: params.window })
   createAuthService({ context, window: params.window, windowAuthManager: params.windowAuthManager })
+  const runAppAction = defineInvoke(context, electronRunAppAction)
+  params.serverChannel.setActionRunner(action => runAppAction({ action }))
 
   defineInvokeHandler(context, electronOpenMainDevtools, () => params.window.webContents.openDevTools({ mode: 'detach' }))
   defineInvokeHandler(context, electronOpenSettings, payload => params.settingsWindow.openWindow(payload?.route))

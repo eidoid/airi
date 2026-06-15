@@ -1,7 +1,7 @@
 import type { Server, ServerOptions } from '@proj-airi/server-runtime/server'
 import type { Lifecycle } from 'injeca'
 
-import type { ElectronServerChannelConfig } from '../../../../shared/eventa'
+import type { ElectronAppActionName, ElectronRunAppActionResult, ElectronServerChannelConfig } from '../../../../shared/eventa'
 
 import { randomUUID, X509Certificate } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -56,6 +56,11 @@ const channelServerConfigStore = createConfig('server-channel', 'config.json', c
 })
 let serverChannelServiceRegistered = false
 let serverChannelCertificateTrustConfigured = false
+let runAction: ((action: ElectronAppActionName) => Promise<ElectronRunAppActionResult>) | undefined
+
+function isElectronAppActionName(action: string): action is ElectronAppActionName {
+  return action === 'toggle-hearing-autosend'
+}
 
 interface ServerChannelCertificateVerifyRequest {
   hostname: string
@@ -354,7 +359,7 @@ async function getOrCreateCertificate() {
   return { cert: withCertificateChain(cert, caCert), key }
 }
 
-export async function setupServerChannel(params: { lifecycle: Lifecycle }): Promise<Server> {
+export async function setupServerChannel(params: { lifecycle: Lifecycle }): Promise<ServerChannel> {
   channelServerConfigStore.setup()
   configureServerChannelCertificateTrust()
 
@@ -364,7 +369,22 @@ export async function setupServerChannel(params: { lifecycle: Lifecycle }): Prom
     channelServerConfigStore.update(normalizedStoredConfig)
   }
 
-  const serverChannel = createServer(await resolveServerRuntimeOptions(normalizedStoredConfig))
+  const serverChannel = createServer({
+    ...await resolveServerRuntimeOptions(normalizedStoredConfig),
+    actions: {
+      async invoke(action) {
+        if (!isElectronAppActionName(action)) {
+          throw new Error(`Unknown AIRI action: ${action}`)
+        }
+
+        if (!runAction) {
+          throw new Error('AIRI main window is not ready to receive actions.')
+        }
+
+        return await runAction(action)
+      },
+    },
+  })
 
   const mutex = new Mutex()
 
@@ -445,6 +465,9 @@ export async function setupServerChannel(params: { lifecycle: Lifecycle }): Prom
         release()
       }
     },
+    setActionRunner(runner) {
+      runAction = runner
+    },
   }
 }
 
@@ -506,4 +529,6 @@ export async function createServerChannelService(params: { serverChannel: Server
   })
 }
 
-export type { Server as ServerChannel }
+export interface ServerChannel extends Server {
+  setActionRunner: (runner: (action: ElectronAppActionName) => Promise<ElectronRunAppActionResult>) => void
+}

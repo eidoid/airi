@@ -33,6 +33,8 @@ interface Exp3Json {
 // Controller
 // ---------------------------------------------------------------------------
 
+let expressionControllerId = 0
+
 export interface ExpressionControllerOptions {
   /**
    * The loaded Live2D internal model reference (reactive so it can be null
@@ -55,6 +57,7 @@ export interface ExpressionControllerOptions {
  */
 export function useExpressionController(options: ExpressionControllerOptions) {
   const store = useExpressionStore()
+  const ownerId = `live2d-expression-controller:${++expressionControllerId}`
 
   // Track which parameter IDs were written in the previous frame so we can
   // detect active→inactive transitions and explicitly reset them.
@@ -129,6 +132,7 @@ export function useExpressionController(options: ExpressionControllerOptions) {
       options.modelId ?? 'unknown',
       groups,
       Array.from(entryMap.values()),
+      ownerId,
     )
   }
 
@@ -177,6 +181,15 @@ export function useExpressionController(options: ExpressionControllerOptions) {
     activeLastFrame.clear()
     for (const id of activeThisFrame)
       activeLastFrame.add(id)
+  }
+
+  function resetAppliedExpressions(coreModel: PixiLive2DInternalModel['coreModel']) {
+    for (const paramId of activeLastFrame) {
+      const entry = findEntryByParameterId(paramId)
+      if (entry)
+        coreModel.setParameterValueById(paramId, entry.modelDefault)
+    }
+    activeLastFrame.clear()
   }
 
   /**
@@ -231,7 +244,8 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   // ---- Cleanup -------------------------------------------------------------
 
   function dispose() {
-    store.dispose()
+    activeLastFrame.clear()
+    store.dispose(ownerId)
   }
 
   // ---- Private helpers -----------------------------------------------------
@@ -277,6 +291,7 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   return {
     initialise,
     applyExpressions,
+    resetAppliedExpressions,
     dispose,
   }
 }
