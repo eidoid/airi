@@ -673,6 +673,60 @@ pages:
       token-description: 您的Discord机器人令牌
       token-placeholder: 输入您的Discord机器人令牌
       configured: Discord已正确配置！
+    proactive-speech:
+      title: 主动说话
+      description: >-
+        让 AIRI 在随机时间间隔内主动开口。每一段主动发言都会由当前的意识
+        模型生成，再走配置好的语音合成流水线播放出去——不会写入聊天历史。
+      sections:
+        section:
+          schedule:
+            title: 节奏
+            description: >-
+              AIRI 在两次主动发言之间会等待一个落在这个区间内的随机时长。
+              区间越小越爱说话，越大越像背景陪伴。
+            enabled:
+              title: 启用主动说话
+              description: 总开关。仅在开启时 AIRI 会主动说话。
+            interval-min:
+              title: 最小间隔
+              description: 随机等待的下界，单位分钟。
+            interval-max:
+              title: 最大间隔
+              description: 随机等待的上界，单位分钟。
+            max-tokens:
+              title: 单次回复最大长度（token）
+              description: >-
+                限制大模型单次输出长度，让每次主动发言尽量短。降低该值可以
+                减少延迟与费用。
+          prompt:
+            title: Prompt
+            description: >-
+              每次主动触发时发送给大模型的 user 提示词。占位符
+              `{{cardName}}`、`{{now}}`、`{{lastTriggeredAt}}` 会被实时替换。
+            template:
+              title: 提示词模板
+              description: 自由编辑的模板，支持上述占位符。
+            system-prompt-override:
+              title: 系统提示词覆盖
+              description: >-
+                覆盖当前角色的系统提示词，仅对主动发言生效。留空则继承角色
+                卡片上的提示词。
+          runtime:
+            title: 运行状态
+            trigger-now: 立刻说一次
+            trigger-now-description: >-
+              立即强制触发一次主动发言（沿用当前 provider、model 与语音管线）。
+            last-triggered:
+              never: 尚未触发过。
+              at: '上次触发：{timestamp}'
+            last-error:
+              none: 无错误。
+              at: '上次错误：{message}'
+            status:
+              running: 运行中
+              stopped: 已停止
+              thinking: 正在生成回复…
     speech:
       description: 语音合成
       sections:

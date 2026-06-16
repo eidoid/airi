@@ -143,6 +143,7 @@ export default defineConfig({
 
     // https://github.com/JohnCampionJr/vite-plugin-vue-layouts
     Layouts({
+      pagesDirs: [resolve(import.meta.dirname, 'src', 'pages'), resolve(import.meta.dirname, '..', '..', 'packages', 'stage-pages', 'src', 'pages')],
       layoutsDirs: [
         resolve(import.meta.dirname, 'src', 'layouts'),
         resolve(import.meta.dirname, '..', '..', 'packages', 'stage-layouts', 'src', 'layouts'),

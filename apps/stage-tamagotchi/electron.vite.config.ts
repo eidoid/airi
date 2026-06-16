@@ -239,7 +239,7 @@ export default defineConfig({
           resolve(import.meta.dirname, 'src', 'renderer', 'layouts'),
           resolve(import.meta.dirname, '..', '..', 'packages', 'stage-layouts', 'src', 'layouts'),
         ],
-        pagesDirs: [resolve(import.meta.dirname, 'src', 'renderer', 'pages')],
+        pagesDirs: [resolve(import.meta.dirname, 'src', 'renderer', 'pages'), resolve(import.meta.dirname, '..', '..', 'packages', 'stage-pages', 'src', 'pages')],
       }),
 
       UnoCss(),

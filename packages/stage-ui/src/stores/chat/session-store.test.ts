@@ -1,6 +1,4 @@
-import type { ChatHistoryItem } from '../../types/chat'
 import type { ChatSessionMeta, ChatSessionRecord, ChatSessionsIndex } from '../../types/chat-session'
-import type { AiriCard } from '../modules/airi-card'
 
 import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,7 +9,6 @@ import { nextTick, ref } from 'vue'
 const userIdRef = ref<string>('local')
 const activeCardIdRef = ref<string>('default')
 const systemPromptRef = ref<string>('')
-const activeCardRef = ref<Pick<AiriCard, 'greetings'> | undefined>(undefined)
 
 const getIndexMock = vi.fn<(uid: string) => Promise<ChatSessionsIndex | null>>()
 const saveIndexMock = vi.fn<(idx: ChatSessionsIndex) => Promise<void>>()
@@ -38,7 +35,6 @@ vi.mock('../auth', () => ({
 
 vi.mock('../modules/airi-card', () => ({
   useAiriCardStore: () => ({
-    activeCard: activeCardRef,
     activeCardId: activeCardIdRef,
     systemPrompt: systemPromptRef,
   }),
@@ -107,7 +103,6 @@ beforeEach(() => {
   userIdRef.value = 'local'
   activeCardIdRef.value = 'default'
   systemPromptRef.value = ''
-  activeCardRef.value = undefined
 
   getIndexMock.mockReset().mockResolvedValue(null)
   saveIndexMock.mockReset().mockResolvedValue(undefined)
@@ -128,160 +123,6 @@ async function flushMicrotasks(rounds = 8) {
   for (let i = 0; i < rounds; i++)
     await Promise.resolve()
 }
-
-describe('chat-session-store · card greetings', () => {
-  it('seeds a new session with one random greeting from the active card', async () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.6)
-    activeCardRef.value = {
-      greetings: ['Hello there', 'Welcome back'],
-    }
-    systemPromptRef.value = 'system prompt'
-
-    try {
-      const store = useChatSessionStore()
-      await store.initialize()
-
-      expect(store.messages.length).toBe(2)
-      expect(store.messages[0]).toMatchObject({
-        role: 'system',
-      })
-      expect(store.messages[0]?.content).toContain('system prompt')
-      expect(store.messages[1]).toMatchObject({
-        role: 'assistant',
-        content: 'Welcome back',
-        slices: [{ type: 'text', text: 'Welcome back' }],
-        tool_results: [],
-      })
-      expect(store.pendingGreetingMessage).toMatchObject({
-        sessionId: store.activeSessionId,
-        message: {
-          role: 'assistant',
-          content: 'Welcome back',
-        },
-      })
-    }
-    finally {
-      randomSpy.mockRestore()
-    }
-  })
-
-  it('reseeds a manually cleared session with a newly selected greeting', async () => {
-    const randomSpy = vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(0.99)
-    activeCardRef.value = {
-      greetings: ['First greeting', 'Second greeting'],
-    }
-
-    try {
-      const store = useChatSessionStore()
-      await store.initialize()
-
-      expect(store.messages[1]).toMatchObject({
-        role: 'assistant',
-        content: 'First greeting',
-      })
-
-      store.cleanupMessages()
-
-      expect(store.messages.length).toBe(2)
-      expect(store.messages[1]).toMatchObject({
-        role: 'assistant',
-        content: 'Second greeting',
-        slices: [{ type: 'text', text: 'Second greeting' }],
-        tool_results: [],
-      })
-      expect(store.pendingGreetingMessage).toMatchObject({
-        sessionId: store.activeSessionId,
-        message: {
-          role: 'assistant',
-          content: 'Second greeting',
-        },
-      })
-    }
-    finally {
-      randomSpy.mockRestore()
-    }
-  })
-
-  it('appends a fresh greeting to an existing active session on startup', async () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
-    activeCardRef.value = {
-      greetings: ['Restart hello'],
-    }
-    const meta: ChatSessionMeta = {
-      sessionId: 'sess-existing',
-      userId: 'local',
-      characterId: 'default',
-      createdAt: 1,
-      updatedAt: 1,
-    }
-    const existingMessages: ChatHistoryItem[] = [
-      { role: 'system', content: 'system', id: 'system-1', createdAt: 1 },
-      { role: 'user', content: 'previous user turn', id: 'user-1', createdAt: 2 },
-    ]
-    getIndexMock.mockResolvedValue({
-      userId: 'local',
-      characters: {
-        default: {
-          activeSessionId: 'sess-existing',
-          sessions: { 'sess-existing': meta },
-        },
-      },
-    })
-    getSessionMock.mockResolvedValue({
-      meta,
-      messages: existingMessages,
-    })
-
-    try {
-      const store = useChatSessionStore()
-      await store.initialize()
-
-      expect(store.messages.map(message => message.content)).toEqual([
-        'system',
-        'previous user turn',
-        'Restart hello',
-      ])
-      expect(store.pendingGreetingMessage).toMatchObject({
-        sessionId: 'sess-existing',
-        message: {
-          role: 'assistant',
-          content: 'Restart hello',
-        },
-      })
-    }
-    finally {
-      randomSpy.mockRestore()
-    }
-  })
-
-  it('consumes pending greeting once for speech playback', async () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
-    activeCardRef.value = {
-      greetings: ['Speak once'],
-    }
-
-    try {
-      const store = useChatSessionStore()
-      await store.initialize()
-
-      const pending = store.takePendingGreetingMessage()
-
-      expect(pending).toMatchObject({
-        sessionId: store.activeSessionId,
-        message: {
-          role: 'assistant',
-          content: 'Speak once',
-        },
-      })
-      expect(store.pendingGreetingMessage).toBeNull()
-    }
-    finally {
-      randomSpy.mockRestore()
-    }
-  })
-})
 
 describe('chat-session-store · user swap during in-flight ensureActiveSessionForCharacter', () => {
   // ROOT CAUSE:
