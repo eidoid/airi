@@ -3,7 +3,7 @@ import type { StreamEvent } from '@proj-airi/core-agent'
 import { errorMessageFrom } from '@moeru/std'
 import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
-import { onScopeDispose, ref, watch } from 'vue'
+import { onScopeDispose, shallowRef, watch } from 'vue'
 
 import { useCharacterStore } from '../character'
 import { useChatOrchestratorStore } from '../chat'
@@ -89,19 +89,20 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   const { activeSessionId } = storeToRefs(chatSessionStore)
   const { sending: isOrchestratorSending } = storeToRefs(chatOrchestrator)
 
-  const isRunning = ref(false)
-  const isThinking = ref(false)
-  const lastTriggeredAt = ref<number | null>(null)
-  const lastError = ref<string | null>(null)
-  const lastOutcome = ref<ProactiveSpeechTriggerOutcome | null>(null)
+  const isRunning = shallowRef(false)
+  const isThinking = shallowRef(false)
+  const lastTriggeredAt = shallowRef<number | null>(null)
+  const lastError = shallowRef<string | null>(null)
+  const lastOutcome = shallowRef<ProactiveSpeechTriggerOutcome | null>(null)
 
   /** Wall-clock timestamp (Date.now()) when the next trigger will fire. `null` when no timer is armed. */
-  const nextTriggerAt = ref<number | null>(null)
+  const nextTriggerAt = shallowRef<number | null>(null)
 
   /** Sessions that have already received a greeting (persisted across triggers, lost on page reload). */
-  const greetedSessions = ref(new Set<string>())
+  const greetedSessions = shallowRef(new Set<string>())
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let greetingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
   let disposed = false
 
   function clearTimer() {
@@ -112,9 +113,18 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     }
   }
 
+  function clearGreetingTimer() {
+    if (greetingTimeoutHandle !== null) {
+      clearTimeout(greetingTimeoutHandle)
+      greetingTimeoutHandle = null
+    }
+  }
+
   function armTimer() {
     clearTimer()
     if (disposed)
+      return
+    if (!isRunning.value)
       return
     if (!enabled.value)
       return
@@ -136,20 +146,29 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   function stop() {
     isRunning.value = false
     clearTimer()
+    clearGreetingTimer()
   }
 
   /**
-   * Skip guard for prerequisites that are checked on every trigger so a stale
-   * "always running" timer cannot call the LLM while the user is in the middle
-   * of configuring providers, voice, or model selection.
+   * Skip guard for prerequisites shared by card greetings and generated turns.
+   * AIRI should never write chat history for text that cannot be spoken aloud.
    */
-  function skipReason(): string | undefined {
+  function speechSkipReason(): string | undefined {
+    if (!speechStore.configured)
+      return 'speech synthesis is not configured'
+    return undefined
+  }
+
+  /**
+   * Skip guard for generated proactive turns. Card greetings only need speech
+   * synthesis, while LLM-generated thoughts additionally need a chat provider
+   * and model.
+   */
+  function generatedSpeechSkipReason(): string | undefined {
     if (!activeChatProviderId.value)
       return 'no chat provider configured'
     if (!activeChatModel.value)
       return 'no chat model configured'
-    if (!speechStore.configured)
-      return 'speech synthesis is not configured'
     return undefined
   }
 
@@ -318,6 +337,16 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
 
       const sessionId = activeSessionId.value
       let text: string | undefined
+      const speechReason = speechSkipReason()
+      if (speechReason) {
+        const outcome: ProactiveSpeechTriggerOutcome = {
+          startedAt,
+          finishedAt: Date.now(),
+          skippedReason: speechReason,
+        }
+        lastOutcome.value = outcome
+        return outcome
+      }
 
       // First trigger for a new session: prefer a card greeting.
       if (sessionId && needsGreeting(sessionId)) {
@@ -327,7 +356,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
 
       // No greeting (or already greeted): generate via LLM.
       if (!text) {
-        const reason = skipReason()
+        const reason = generatedSpeechSkipReason()
         if (reason) {
           const outcome: ProactiveSpeechTriggerOutcome = {
             startedAt,
@@ -414,7 +443,9 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
       return
 
     clearTimer()
-    setTimeout(() => {
+    clearGreetingTimer()
+    greetingTimeoutHandle = setTimeout(() => {
+      greetingTimeoutHandle = null
       void runTrigger()
     }, NEW_SESSION_GREETING_DELAY_MS)
   })
@@ -422,6 +453,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   onScopeDispose(() => {
     disposed = true
     clearTimer()
+    clearGreetingTimer()
   })
 
   return {

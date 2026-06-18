@@ -275,6 +275,40 @@ describe('useProactiveSpeechStore · card greetings', () => {
     }
     finally { spy.mockRestore() }
   })
+
+  it('skips card greeting when speech synthesis is not configured', async () => {
+    settingsState.intervalMinMs.value = 1_000
+    settingsState.intervalMaxMs.value = 1_000
+    settingsState.enabled.value = true
+    speechConfigured.value = false
+    const mod = await import('./proactive-speech')
+    const store = mod.useProactiveSpeechStore()
+    await nextTick()
+
+    const outcome = await store.trigger()
+    expect(outcome?.skippedReason).toBe('speech synthesis is not configured')
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(appendSessionMessageMock).not.toHaveBeenCalled()
+    expect(emitTextOutputMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels pending new-session greeting when proactive speech is disabled', async () => {
+    settingsState.enabled.value = true
+    const mod = await import('./proactive-speech')
+    const store = mod.useProactiveSpeechStore()
+    await nextTick()
+
+    chatSessionState.activeSessionId.value = 'next-session'
+    await nextTick()
+    settingsState.enabled.value = false
+    await nextTick()
+
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(store.isRunning).toBe(false)
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(appendSessionMessageMock).not.toHaveBeenCalled()
+    expect(emitTextOutputMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('useProactiveSpeechStore · user activity', () => {

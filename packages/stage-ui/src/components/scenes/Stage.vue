@@ -41,7 +41,7 @@ import { useAudioContext, useSpeakingStore } from '../../stores/audio'
 import { useBackgroundStore } from '../../stores/background'
 import { useChatOrchestratorStore } from '../../stores/chat'
 import { useLlmStreamingControlStore } from '../../stores/llm-streaming-control'
-import { useAiriCardStore } from '../../stores/modules'
+import { useAiriCardStore, useProactiveSpeechStore } from '../../stores/modules'
 import { useSpeechStore, voicePackForSpeechProvider } from '../../stores/modules/speech'
 import { useProvidersStore } from '../../stores/providers'
 import { useSettings } from '../../stores/settings'
@@ -101,6 +101,9 @@ const chatHookCleanups: Array<() => void> = []
 
 const providersStore = useProvidersStore()
 useAuthProviderSync()
+// Instantiate once with the stage so persisted proactive speech settings run
+// during normal AIRI sessions, not only after visiting the settings page.
+useProactiveSpeechStore()
 const live2dStore = useLive2dParams()
 const showStage = ref(true)
 const viewUpdateCleanups: Array<() => void> = []
