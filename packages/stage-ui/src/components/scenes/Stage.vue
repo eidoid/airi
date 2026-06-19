@@ -25,7 +25,7 @@ import { useBroadcastChannel } from '@vueuse/core'
 // import { embed } from '@xsai/embed'
 import { generateSpeech } from '@xsai/generate-speech'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
 import { useSettingsLive2d } from '../../../../stage-ui-live2d/src/composables/live2d/live2d'
 import { useAuthProviderSync } from '../../composables/use-auth-provider-sync'
@@ -37,14 +37,16 @@ import { Emotion, EMOTION_EmotionMotionName_value, EMOTION_VRMExpressionName_val
 import { getDefaultStreamingModel, getDefinedProvider } from '../../libs/providers/providers'
 import { OFFICIAL_SPEECH_PROVIDER_ID } from '../../libs/providers/providers/official'
 import { createStageTtsSession } from '../../libs/speech/tts-session'
+import { getSpeechBusContext, speechOutputEndEvent } from '../../services/speech/bus'
 import { useAudioContext, useSpeakingStore } from '../../stores/audio'
 import { useBackgroundStore } from '../../stores/background'
 import { useChatOrchestratorStore } from '../../stores/chat'
 import { useLlmStreamingControlStore } from '../../stores/llm-streaming-control'
-import { useAiriCardStore } from '../../stores/modules'
+import { useAiriCardStore, useProactiveSpeechStore } from '../../stores/modules'
 import { useSpeechStore, voicePackForSpeechProvider } from '../../stores/modules/speech'
 import { useProvidersStore } from '../../stores/providers'
 import { useSettings } from '../../stores/settings'
+import { useSettingsProactiveSpeech } from '../../stores/settings/proactive-speech'
 import { useSpeechOutputControlStore } from '../../stores/speech-output-control'
 import { useSpeechRuntimeStore } from '../../stores/speech-runtime'
 
@@ -92,6 +94,7 @@ const { mouthOpenSize, nowSpeaking } = storeToRefs(useSpeakingStore())
 const { audioContext } = useAudioContext()
 const currentAudioSource = ref<AudioBufferSourceNode>()
 const { latestStopRequest } = storeToRefs(useSpeechOutputControlStore())
+const speechBusContext = getSpeechBusContext()
 
 const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = useChatOrchestratorStore()
 const chatHookCleanups: Array<() => void> = []
@@ -101,9 +104,30 @@ const chatHookCleanups: Array<() => void> = []
 
 const providersStore = useProvidersStore()
 useAuthProviderSync()
+// Instantiate once with the stage so persisted proactive speech settings run
+// during normal AIRI sessions, not only after visiting the settings page.
+const proactiveSpeechStore = useProactiveSpeechStore()
+const { isRunning: proactiveSpeechRunning, isThinking: proactiveSpeechThinking, nextTriggerAt: proactiveSpeechNextTriggerAt } = storeToRefs(proactiveSpeechStore)
+const { showStageTimer: showProactiveStageTimer } = storeToRefs(useSettingsProactiveSpeech())
 const live2dStore = useLive2dParams()
 const showStage = ref(true)
 const viewUpdateCleanups: Array<() => void> = []
+const proactiveTimerNow = shallowRef(Date.now())
+let proactiveTimerIntervalHandle: ReturnType<typeof setInterval> | undefined
+
+const proactiveStageTimerLabel = computed(() => {
+  if (proactiveSpeechThinking.value)
+    return 'Generating'
+
+  const nextTriggerAt = proactiveSpeechNextTriggerAt.value
+  if (nextTriggerAt === null)
+    return 'Waiting'
+
+  const remainingSeconds = Math.max(0, Math.ceil((nextTriggerAt - proactiveTimerNow.value) / 1000))
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+})
 
 // Caption + Presentation broadcast channels
 type CaptionChannelEvent
@@ -501,6 +525,68 @@ useIOTraceBridge(speechPipeline)
 useSpeechPipelineAnalytics()
 void speechRuntimeStore.registerHost(speechPipeline)
 
+const activePlaybackItemIdsByIntent = new Map<string, Set<string>>()
+const completedStreamingSessionIds = new Set<string>()
+const streamingOutputEndCheckTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function emitSpeechOutputEnd(intentId: string, reason: 'completed' | 'cancelled') {
+  speechBusContext.emit(speechOutputEndEvent, {
+    originId: 'stage',
+    intentId,
+    reason,
+    endedAt: Date.now(),
+  })
+}
+
+function activePlaybackItemIds(intentId: string) {
+  let ids = activePlaybackItemIdsByIntent.get(intentId)
+  if (!ids) {
+    ids = new Set()
+    activePlaybackItemIdsByIntent.set(intentId, ids)
+  }
+  return ids
+}
+
+function rememberPlaybackItem(intentId: string, itemId: string) {
+  activePlaybackItemIds(intentId).add(itemId)
+}
+
+function forgetPlaybackItem(intentId: string, itemId: string) {
+  const ids = activePlaybackItemIdsByIntent.get(intentId)
+  if (!ids)
+    return
+
+  ids.delete(itemId)
+  if (ids.size === 0)
+    activePlaybackItemIdsByIntent.delete(intentId)
+}
+
+function scheduleStreamingOutputEndCheck(intentId: string) {
+  const existingTimer = streamingOutputEndCheckTimers.get(intentId)
+  if (existingTimer != null)
+    clearTimeout(existingTimer)
+
+  // PlaybackManager starts the next queued item after notifying end listeners.
+  // Defer the idle check one macrotask so queued streaming audio gets a chance
+  // to move from waiting -> active before we declare the intent fully spoken.
+  const timer = setTimeout(() => {
+    streamingOutputEndCheckTimers.delete(intentId)
+    if (!completedStreamingSessionIds.has(intentId))
+      return
+    if ((activePlaybackItemIdsByIntent.get(intentId)?.size ?? 0) > 0)
+      return
+
+    completedStreamingSessionIds.delete(intentId)
+    emitSpeechOutputEnd(intentId, 'completed')
+  }, 0)
+  streamingOutputEndCheckTimers.set(intentId, timer)
+}
+
+function markStreamingSessionCompleted(intentId: string) {
+  completedStreamingSessionIds.add(intentId)
+  scheduleStreamingOutputEndCheck(intentId)
+}
+
 speechPipeline.on('onSpecial', (segment) => {
   if (segment.special) {
     void playSpecialToken(segment.special, {
@@ -519,12 +605,23 @@ speechPipeline.on('onTurnCancel', ({ turnId }) => {
   streamingControl.cancelTurn(turnId)
 })
 
-playbackManager.onEnd(() => {
+speechPipeline.on('onIntentEnd', (intentId) => {
+  emitSpeechOutputEnd(intentId, 'completed')
+})
+
+speechPipeline.on('onIntentCancel', ({ intentId }) => {
+  emitSpeechOutputEnd(intentId, 'cancelled')
+})
+
+playbackManager.onEnd(({ item }) => {
+  forgetPlaybackItem(item.intentId, item.id)
+  scheduleStreamingOutputEndCheck(item.intentId)
   nowSpeaking.value = false
   mouthOpenSize.value = 0
 })
 
 playbackManager.onStart(({ item }) => {
+  rememberPlaybackItem(item.intentId, item.id)
   nowSpeaking.value = true
   // NOTICE: postCaption and postPresent may throw errors if the BroadcastChannel is closed
   // (e.g., when navigating away from the page). We wrap these in try-catch to prevent
@@ -542,6 +639,13 @@ playbackManager.onStart(({ item }) => {
   catch {
     // BroadcastChannel may be closed - don't break playback
   }
+})
+
+playbackManager.onInterrupt(({ item }) => {
+  forgetPlaybackItem(item.intentId, item.id)
+  scheduleStreamingOutputEndCheck(item.intentId)
+  nowSpeaking.value = false
+  mouthOpenSize.value = 0
 })
 
 function startLipSyncLoop() {
@@ -719,6 +823,8 @@ function openTtsSession(): StageTtsSession {
         clearIfActive()
       },
       onDone: () => {
+        if (session?.intentId.startsWith('stream-'))
+          markStreamingSessionCompleted(session.intentId)
         clearIfActive()
       },
     },
@@ -823,6 +929,9 @@ if (typeof window !== 'undefined') {
 }
 
 onMounted(async () => {
+  proactiveTimerIntervalHandle = setInterval(() => {
+    proactiveTimerNow.value = Date.now()
+  }, 1000)
   await getDb() // stub for future update
 })
 
@@ -910,6 +1019,10 @@ async function captureFrame() {
 }
 
 onUnmounted(() => {
+  if (proactiveTimerIntervalHandle !== undefined) {
+    clearInterval(proactiveTimerIntervalHandle)
+    proactiveTimerIntervalHandle = undefined
+  }
   resetLive2dLipSync()
   chatHookCleanups.forEach(dispose => dispose?.())
   viewUpdateCleanups.forEach(dispose => dispose?.())
@@ -921,6 +1034,11 @@ onUnmounted(() => {
   currentSession?.cancel('unmount')
   currentSession = null
   playbackManager.stopAll('unmount')
+  for (const timer of streamingOutputEndCheckTimers.values())
+    clearTimeout(timer)
+  streamingOutputEndCheckTimers.clear()
+  completedStreamingSessionIds.clear()
+  activePlaybackItemIdsByIntent.clear()
 })
 
 defineExpose({
@@ -1014,6 +1132,26 @@ defineExpose({
             <p>Godot Stage (experimental) is running...</p>
           </Callout>
         </div>
+      </div>
+      <div
+        v-if="showProactiveStageTimer && proactiveSpeechRunning"
+        :class="[
+          'pointer-events-none absolute left-3 top-3 z-10',
+          'flex items-center gap-2',
+          'rounded-md px-2 py-1',
+          'bg-white/75 text-neutral-700 shadow-sm backdrop-blur',
+          'dark:bg-black/50 dark:text-neutral-100',
+        ]"
+      >
+        <span
+          :class="[
+            'inline-block h-2 w-2 rounded-full',
+            proactiveSpeechThinking ? 'animate-pulse bg-yellow-400' : 'bg-green-500',
+          ]"
+        />
+        <span :class="['text-xs font-medium tabular-nums']">
+          Proactive {{ proactiveStageTimerLabel }}
+        </span>
       </div>
     </div>
   </div>

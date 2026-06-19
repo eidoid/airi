@@ -112,6 +112,27 @@ describe('streamFrom tool error capture', () => {
   })
 })
 
+describe('streamFrom generation options', () => {
+  it('forwards maxTokens as the OpenAI-compatible max_tokens request field', async () => {
+    /**
+     * @example
+     * await streamFrom({ model, chatProvider, messages, options: { maxTokens: 64 } })
+     * // -> streamText({ max_tokens: 64, ... })
+     */
+    streamTextMock.mockClear()
+    streamTextMock.mockReturnValueOnce(createMockStreamResult())
+
+    await streamFrom({
+      model: 'model-a',
+      chatProvider: provider,
+      messages: [{ role: 'user', content: 'hello' }] as Message[],
+      options: { maxTokens: 64 },
+    })
+
+    expect(streamTextMock.mock.calls[0]?.[0]?.max_tokens).toBe(64)
+  })
+})
+
 describe('sanitizeMessages', () => {
   it('rewrites internal `error`-role messages as user-role narrations', () => {
     /**

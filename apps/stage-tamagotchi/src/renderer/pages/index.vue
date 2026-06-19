@@ -1,20 +1,26 @@
 <script setup lang="ts">
 import type { ModelSettingsRuntimeSnapshot } from '@proj-airi/stage-ui/components/scenarios/settings/model-settings/runtime'
 
-import type { ModelSettingsRuntimeChannelEvent } from '../../shared/model-settings-runtime'
+import type {
+  Live2DExpressionRuntimeSnapshot,
+  ModelSettingsRuntimeChannelEvent,
+} from '../../shared/model-settings-runtime'
 
 import workletUrl from '@proj-airi/stage-ui/workers/vad/process.worklet?worker&url'
 
+import { defineInvokeHandler } from '@moeru/eventa'
+import { createContext } from '@moeru/eventa/adapters/electron/renderer'
 import { tryCatch } from '@moeru/std'
 import { electron } from '@proj-airi/electron-eventa'
 import {
   useElectronEventaInvoke,
   useElectronMouseAroundWindowBorder,
   useElectronMouseInElement,
-  useElectronMouseInWindow,
   useElectronRelativeMouse,
+  useElectronWindowBounds,
 } from '@proj-airi/electron-vueuse'
 import { IS_DEV } from '@proj-airi/stage-shared'
+import { useExpressionStore } from '@proj-airi/stage-ui-live2d/stores/expression-store'
 import { useModelStore, useThreeSceneIsTransparentAtPoint } from '@proj-airi/stage-ui-three'
 import { HoloCoupon } from '@proj-airi/stage-ui/components'
 import {
@@ -25,18 +31,18 @@ import { WidgetStage } from '@proj-airi/stage-ui/components/scenes'
 import { useAudioRecorder } from '@proj-airi/stage-ui/composables/audio/audio-recorder'
 import { useCanvasPixelIsTransparentAtPoint } from '@proj-airi/stage-ui/composables/canvas-alpha'
 import { useVAD } from '@proj-airi/stage-ui/stores/ai/models/vad'
-import { useHearingSpeechInputPipeline } from '@proj-airi/stage-ui/stores/modules/hearing'
+import { useHearingSpeechInputPipeline, useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
-import { refDebounced, useBroadcastChannel } from '@vueuse/core'
+import { refDebounced, useBroadcastChannel, useEventListener } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 
 import ControlsIsland from '../components/stage-islands/controls-island/index.vue'
 import ResourceStatusIsland from '../components/stage-islands/resource-status-island/index.vue'
 import StatusIsland from '../components/stage-islands/status-island/index.vue'
 
-import { electronOpenOnboarding } from '../../shared/eventa'
+import { electronOpenOnboarding, electronRunAppAction } from '../../shared/eventa'
 import { modelSettingsRuntimeSnapshotChannelName } from '../../shared/model-settings-runtime'
 import { useChatSyncStore } from '../stores/chat-sync'
 import { useControlsIslandStore } from '../stores/controls-island'
@@ -57,12 +63,78 @@ const shouldFadeOnCursorWithin = ref(false)
 const onboardingStore = useOnboardingStore()
 const openOnboarding = useElectronEventaInvoke(electronOpenOnboarding)
 
-const { isOutside: isOutsideWindow } = useElectronMouseInWindow()
 const { isOutside } = useElectronMouseInElement(controlsIslandRef)
 const { isOutside: isOutsideStatusIsland } = useElectronMouseInElement(statusIslandRef)
 const isOutsideFor250Ms = refDebounced(isOutside, 250)
 const isOutsideStatusIslandFor250Ms = refDebounced(isOutsideStatusIsland, 250)
 const { x: relativeMouseX, y: relativeMouseY } = useElectronRelativeMouse()
+const { width: windowWidth, height: windowHeight } = useElectronWindowBounds()
+const areHoverIslandsVisible = ref(false)
+const isPointerInsideWindowForMenu = shallowRef(false)
+const hasPointerLeftWindowForMenu = shallowRef(false)
+const lastMenuPointerLeaveAt = shallowRef(0)
+const isPointerInsideWindow = shallowRef(true)
+const hasPointerInsideWindowSignal = shallowRef(false)
+
+function markPointerInsideWindow() {
+  hasPointerInsideWindowSignal.value = true
+  isPointerInsideWindow.value = true
+}
+
+function markMenuPointerInsideWindow() {
+  hasPointerLeftWindowForMenu.value = false
+  isPointerInsideWindowForMenu.value = true
+}
+
+function refreshMenuPointerInsideWindow(event: PointerEvent | TouchEvent) {
+  if (hasPointerLeftWindowForMenu.value && Date.now() - lastMenuPointerLeaveAt.value < 120)
+    return
+
+  if (hasPointerLeftWindowForMenu.value && event instanceof PointerEvent) {
+    const isInsideViewport = event.clientX >= 0
+      && event.clientY >= 0
+      && event.clientX <= window.innerWidth
+      && event.clientY <= window.innerHeight
+
+    if (!isInsideViewport)
+      return
+  }
+
+  hasPointerLeftWindowForMenu.value = false
+  isPointerInsideWindowForMenu.value = true
+}
+
+function markMenuPointerOutsideWindow() {
+  lastMenuPointerLeaveAt.value = Date.now()
+  hasPointerLeftWindowForMenu.value = true
+  isPointerInsideWindowForMenu.value = false
+}
+
+useEventListener(window, 'mouseenter', markMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointerenter', markMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointermove', refreshMenuPointerInsideWindow, { passive: true })
+useEventListener(window, 'touchmove', refreshMenuPointerInsideWindow, { passive: true })
+useEventListener(document, 'mouseleave', markMenuPointerOutsideWindow, { passive: true })
+
+useEventListener(window, 'pointerenter', markPointerInsideWindow, { passive: true })
+useEventListener(window, 'pointermove', markPointerInsideWindow, { passive: true })
+useEventListener(window, 'touchmove', markPointerInsideWindow, { passive: true })
+useEventListener(document, 'mouseleave', () => {
+  hasPointerInsideWindowSignal.value = true
+  isPointerInsideWindow.value = false
+}, { passive: true })
+
+const isOutsideWindow = computed(() => {
+  if (hasPointerInsideWindowSignal.value)
+    return !isPointerInsideWindow.value
+
+  return windowWidth.value <= 0
+    || windowHeight.value <= 0
+    || relativeMouseX.value < 0
+    || relativeMouseY.value < 0
+    || relativeMouseX.value > windowWidth.value
+    || relativeMouseY.value > windowHeight.value
+})
 // NOTICE: In real-world use cases of Fade on Hover feature, the cursor may move around the edge of the
 // model rapidly, causing flickering effects when checking pixel transparency strictly.
 // Here we use render-target pixel sampling to keep detection aligned with the actual render output.
@@ -80,7 +152,9 @@ const isTransparentByThree = useThreeSceneIsTransparentAtPoint(
 )
 
 const settingsStore = useSettings()
+const expressionStore = useExpressionStore()
 const { stageModelRenderer, stageModelSelectedUrl } = storeToRefs(settingsStore)
+const { activeExpressionGroups: live2dActiveExpressionGroups, expressions: live2dExpressions, expressionGroups: live2dExpressionGroups, llmExposed: live2dExpressionLlmExposed, llmMode: live2dExpressionLlmMode, modelId: live2dExpressionModelId } = storeToRefs(expressionStore)
 const modelStore = useModelStore()
 const { sceneMutationLocked, scenePhase } = storeToRefs(modelStore)
 const { stagePaused } = storeToRefs(useStageWindowLifecycleStore())
@@ -116,6 +190,7 @@ const { pause, resume } = watch(isTransparent, (transparent) => {
 }, { immediate: true })
 
 const hearingDialogOpen = computed(() => controlsIslandRef.value?.hearingDialogOpen ?? false)
+const controlsExpanded = computed(() => controlsIslandRef.value?.expanded ?? false)
 
 const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() => {
   const hasModel = !!stageModelSelectedUrl.value
@@ -180,7 +255,65 @@ const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() =
   })
 })
 
-watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isOutsideWindow, isTransparent, hearingDialogOpen, fadeOnHoverEnabled, stagePaused], () => {
+const live2dExpressionRuntimeSnapshot = computed<Live2DExpressionRuntimeSnapshot | undefined>(() => {
+  if (stageModelRenderer.value !== 'live2d')
+    return undefined
+
+  if (live2dExpressionGroups.value.size === 0 && live2dExpressions.value.size === 0)
+    return undefined
+
+  return {
+    ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,
+    modelId: live2dExpressionModelId.value,
+    groups: Array.from(live2dExpressionGroups.value.values()).map(group => ({
+      name: group.name,
+      parameters: group.parameters.map(parameter => ({
+        parameterId: parameter.parameterId,
+        blend: parameter.blend,
+        value: parameter.value,
+      })),
+    })),
+    entries: Array.from(live2dExpressions.value.values()).map(entry => ({
+      name: entry.name,
+      parameterId: entry.parameterId,
+      blend: entry.blend,
+      currentValue: entry.currentValue,
+      defaultValue: entry.defaultValue,
+      modelDefault: entry.modelDefault,
+      targetValue: entry.targetValue,
+    })),
+    activeGroups: Array.from(live2dActiveExpressionGroups.value),
+    llmMode: live2dExpressionLlmMode.value,
+    llmExposed: Array.from(live2dExpressionLlmExposed.value.entries()).map(([name, exposed]) => ({
+      name,
+      exposed,
+    })),
+    updatedAt: Date.now(),
+  }
+})
+
+function postModelSettingsRuntimeSnapshot(snapshot = modelSettingsRuntimeSnapshot.value) {
+  postModelSettingsRuntimeChannelEvent({
+    type: 'snapshot',
+    snapshot,
+    live2dExpressions: live2dExpressionRuntimeSnapshot.value,
+  })
+}
+
+watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isPointerInsideWindowForMenu, isOutsideWindow, isTransparent, hearingDialogOpen, controlsExpanded, fadeOnHoverEnabled, stagePaused], () => {
+  const insideControls = !isOutsideFor250Ms.value || !isOutsideStatusIslandFor250Ms.value || controlsExpanded.value
+  const nearBorder = isAroundWindowBorderFor250Ms.value
+
+  if (hasPointerLeftWindowForMenu.value && !controlsExpanded.value && !hearingDialogOpen.value && !stagePaused.value) {
+    areHoverIslandsVisible.value = false
+  }
+  else if (insideControls || nearBorder || hearingDialogOpen.value || stagePaused.value) {
+    areHoverIslandsVisible.value = true
+  }
+  else {
+    areHoverIslandsVisible.value = isPointerInsideWindowForMenu.value
+  }
+
   if (stagePaused.value) {
     isIgnoringMouseEvents.value = false
     shouldFadeOnCursorWithin.value = false
@@ -197,9 +330,6 @@ watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor
     pause()
     return
   }
-
-  const insideControls = !isOutsideFor250Ms.value || !isOutsideStatusIslandFor250Ms.value
-  const nearBorder = isAroundWindowBorderFor250Ms.value
 
   if (insideControls || nearBorder) {
     // Inside interactive controls or near resize border: do NOT ignore events
@@ -223,19 +353,44 @@ watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor
 
 // Emit runtime snapshot on change and on request from settings panel
 watch(modelSettingsRuntimeSnapshot, (snapshot) => {
-  postModelSettingsRuntimeChannelEvent({ type: 'snapshot', snapshot })
+  postModelSettingsRuntimeSnapshot(snapshot)
 }, { immediate: true })
 
+watch(live2dExpressionRuntimeSnapshot, () => {
+  postModelSettingsRuntimeSnapshot()
+})
+
 watch(modelSettingsRuntimeChannelEvent, (event) => {
-  if (event?.type !== 'request-current')
+  if (!event)
     return
 
-  postModelSettingsRuntimeChannelEvent({ type: 'snapshot', snapshot: modelSettingsRuntimeSnapshot.value })
+  if (event.type === 'request-current') {
+    postModelSettingsRuntimeSnapshot()
+    return
+  }
+
+  if (event.type === 'live2d-expression-llm-settings' && event.ownerInstanceId === modelSettingsRuntimeOwnerInstanceId) {
+    expressionStore.setLlmExposure(
+      event.llmMode,
+      event.llmExposed.map(({ name, exposed }) => [name, exposed] as const),
+    )
+    postModelSettingsRuntimeSnapshot()
+  }
+
+  if (event.type === 'live2d-expression-preview' && event.ownerInstanceId === modelSettingsRuntimeOwnerInstanceId) {
+    if (event.name)
+      expressionStore.set(event.name, true)
+    else
+      expressionStore.resetAll()
+
+    postModelSettingsRuntimeSnapshot()
+  }
 })
 
 const settingsAudioDeviceStore = useSettingsAudioDevice()
 const { stream, enabled } = storeToRefs(settingsAudioDeviceStore)
 const { askPermission } = settingsAudioDeviceStore
+const hearingStore = useHearingStore()
 const { startRecord, stopRecord, onStopRecord } = useAudioRecorder(stream)
 const hearingPipeline = useHearingSpeechInputPipeline()
 const { transcribeForRecording, transcribeForMediaStream, stopStreamingTranscription } = hearingPipeline
@@ -405,6 +560,31 @@ function stopAudioInteraction() {
   })
 }
 
+const { context: electronEventaContext } = createContext(window.electron.ipcRenderer)
+const stopRunAppActionHandler = defineInvokeHandler(electronEventaContext, electronRunAppAction, async ({ action }) => {
+  switch (action) {
+    case 'toggle-hearing-autosend': {
+      const shouldEnable = !enabled.value || !hearingStore.autoSendEnabled
+      hearingStore.autoSendEnabled = shouldEnable
+      enabled.value = shouldEnable
+
+      if (shouldEnable) {
+        await askPermission()
+        await startAudioInteraction()
+      }
+      else {
+        stopAudioInteraction()
+      }
+
+      return {
+        action,
+        hearingEnabled: enabled.value,
+        autoSendEnabled: hearingStore.autoSendEnabled,
+      }
+    }
+  }
+})
+
 watch(enabled, async (val) => {
   console.info('[Main Page] Audio enabled changed:', val, 'stream available:', !!stream.value)
   if (val) {
@@ -423,6 +603,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopRunAppActionHandler()
   postModelSettingsRuntimeChannelEvent({
     type: 'owner-gone',
     ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,
@@ -486,7 +667,7 @@ const cursorPosition = computed(() => ({
           'transition-opacity duration-250 ease-in-out',
         ]"
       >
-        <StatusIsland v-if="IS_DEV" ref="statusIslandRef" />
+        <StatusIsland v-if="IS_DEV" ref="statusIslandRef" :visible="areHoverIslandsVisible" />
         <ResourceStatusIsland />
         <WidgetStage
           ref="widgetStageRef"
@@ -499,6 +680,7 @@ const cursorPosition = computed(() => ({
         <HoloCoupon />
         <ControlsIsland
           ref="controlsIslandRef"
+          :visible="areHoverIslandsVisible"
         />
       </div>
     </div>
@@ -549,23 +731,6 @@ const cursorPosition = computed(() => ({
         </div>
         <div class="wall absolute bottom-0 h-8 drag-region" />
       </div>
-    </div>
-  </Transition>
-  <Transition
-    enter-active-class="transition-opacity duration-250 ease-in-out"
-    enter-from-class="opacity-50"
-    enter-to-class="opacity-100"
-    leave-active-class="transition-opacity duration-250 ease-in-out"
-    leave-from-class="opacity-100"
-    leave-to-class="opacity-50"
-  >
-    <div v-if="isAroundWindowBorderFor250Ms && !isLoading" class="pointer-events-none absolute left-0 top-0 z-999 h-full w-full">
-      <div
-        :class="[
-          'b-primary/50',
-          'h-full w-full animate-flash animate-duration-3s animate-count-infinite b-4 rounded-2xl',
-        ]"
-      />
     </div>
   </Transition>
 </template>

@@ -13,6 +13,11 @@ export type StreamEvent
 export interface StreamOptions {
   abortSignal?: AbortSignal
   headers?: Record<string, string>
+  /**
+   * Maximum number of tokens the provider should generate for this stream.
+   * Omitted by default so normal chat turns keep provider/model defaults.
+   */
+  maxTokens?: number
   onStreamEvent?: (event: StreamEvent) => void | Promise<void>
   toolsCompatibility?: Map<string, boolean>
   supportsTools?: boolean

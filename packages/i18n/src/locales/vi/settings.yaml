@@ -156,6 +156,8 @@ live2d:
     force-idle-eye-animation:
       title: Idle eye movement
       description: Randomly look around when there is no active cursor focus.
+    idle-eye-delay:
+      title: Idle eye delay (seconds)
     blink-enable:
       title: Enable blink
       description: Let the model blink.
@@ -321,6 +323,7 @@ pages:
     description: Dùng preset thẻ nhân vật AIRI
     description_label: Mô tả
     drop_here: Kéo vào đây để tải lên
+    import_error: Không thể nhập thẻ
     create_card: Tạo thẻ mới
     edit_card: Chỉnh sửa thẻ
     creation:

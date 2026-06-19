@@ -232,6 +232,14 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     return runtime.ingest(sendingMessage, options, targetSessionId)
   }
 
+  async function generateAssistant(
+    prompt: string,
+    options: ChatOrchestratorSendOptions,
+    targetSessionId?: string,
+  ) {
+    return runtime.generateAssistant(prompt, options, targetSessionId)
+  }
+
   async function ingestOnFork(
     sendingMessage: string,
     options: ChatOrchestratorSendOptions,
@@ -263,6 +271,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     pendingQueuedSendCount,
 
     ingest,
+    generateAssistant,
     ingestOnFork,
     cancelPendingSends,
     getPendingQueuedSendSnapshot,

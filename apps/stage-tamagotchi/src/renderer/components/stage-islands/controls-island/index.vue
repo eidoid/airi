@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { defineInvoke } from '@moeru/eventa'
-import { useElectronEventaContext, useElectronEventaInvoke, useElectronMouseInElement } from '@proj-airi/electron-vueuse'
+import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { useTheme } from '@proj-airi/ui'
-import { refDebounced, useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -24,6 +23,15 @@ import {
   electronStartDraggingWindow,
   electronWindowSetAlwaysOnTop,
 } from '../../../../shared/eventa'
+import { useStageWindowLifecycleStore } from '../../../stores/stage-window-lifecycle'
+
+interface Props {
+  visible?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  visible: true,
+})
 
 const { isDark, toggleDark } = useTheme()
 const { t } = useI18n()
@@ -33,6 +41,7 @@ const settingsStore = useSettings()
 const context = useElectronEventaContext()
 const { enabled } = storeToRefs(settingsAudioDeviceStore)
 const { alwaysOnTop, controlsIslandIconSize } = storeToRefs(settingsStore)
+const { windowLifecycle } = storeToRefs(useStageWindowLifecycleStore())
 const openSettings = useElectronEventaInvoke(electronOpenSettings)
 const openChat = useElectronEventaInvoke(electronOpenChat)
 const isLinux = useElectronEventaInvoke(electron.app.isLinux)
@@ -40,11 +49,9 @@ const closeWindow = useElectronEventaInvoke(electronAppQuit)
 const setAlwaysOnTop = useElectronEventaInvoke(electronWindowSetAlwaysOnTop)
 
 const expanded = ref(false)
-const islandRef = ref<HTMLElement>()
 
 // Tracks open overlays/dialogs that should prevent auto-collapse (e.g. 'hearing', 'profile-picker')
 const blockingOverlays = reactive(new Set<string>())
-const isBlocked = computed(() => blockingOverlays.size > 0)
 
 function setOverlay(key: string, active: boolean) {
   if (active) {
@@ -57,17 +64,9 @@ function setOverlay(key: string, active: boolean) {
 
 // Expose for parent (e.g. to disable click-through when a dialog is open)
 defineExpose({
+  get expanded() { return expanded.value },
   get hearingDialogOpen() { return blockingOverlays.has('hearing') },
   set hearingDialogOpen(v: boolean) { setOverlay('hearing', v) },
-})
-
-const { isOutside } = useElectronMouseInElement(islandRef)
-const isOutsideAfter2seconds = refDebounced(isOutside, 1500)
-
-watch(isOutsideAfter2seconds, (outside) => {
-  if (outside && expanded.value && !isBlocked.value) {
-    expanded.value = false
-  }
 })
 
 watch(expanded, (isExpanded) => {
@@ -76,11 +75,13 @@ watch(expanded, (isExpanded) => {
   }
 })
 
-useIntervalFn(() => {
-  if (expanded.value && isOutside.value && !isBlocked.value) {
-    expanded.value = false
-  }
-}, 1500)
+watch(() => windowLifecycle.value.focused, (focused) => {
+  if (focused)
+    return
+
+  expanded.value = false
+  blockingOverlays.clear()
+})
 
 // Apply alwaysOnTop on mount and when it changes
 watch(alwaysOnTop, (val) => {
@@ -131,7 +132,13 @@ function refreshWindow() {
 </script>
 
 <template>
-  <div ref="islandRef" fixed bottom-2 right-2>
+  <div
+    :class="[
+      'fixed bottom-2 right-2',
+      'transition-opacity duration-200 ease-out',
+      props.visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+    ]"
+  >
     <div flex flex-col items-end gap-1>
       <!-- iOS Style Drawer Panel -->
       <Transition

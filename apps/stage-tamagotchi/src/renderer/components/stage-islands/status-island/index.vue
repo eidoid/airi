@@ -12,6 +12,14 @@ import ControlButton from '../controls-island/control-button.vue'
 
 import { electronOpenSettings } from '../../../../shared/eventa'
 
+interface Props {
+  visible?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  visible: true,
+})
+
 const { t } = useI18n()
 const { connected } = storeToRefs(useModsServerChannelStore())
 const openSettings = useElectronEventaInvoke(electronOpenSettings)
@@ -58,7 +66,13 @@ const tooltipLabel = computed(() => {
 </script>
 
 <template>
-  <div fixed right-3 top-3 z-20>
+  <div
+    :class="[
+      'fixed right-3 top-3 z-20',
+      'transition-opacity duration-200 ease-out',
+      props.visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+    ]"
+  >
     <ControlButtonTooltip side="left">
       <ControlButton
         :button-style="buttonStyle.join(' ')"

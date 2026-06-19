@@ -170,4 +170,157 @@ describe('airi-card store', () => {
     expect(cardStore.activeCard?.extensions.airi.modules.speech.voicePack?.params).toEqual({ pitch: '+20%' })
     expect(cardStore.activeCard?.extensions.airi.modules.speech.voicePack?.voiceId).toBe('voice-a')
   })
+
+  /**
+   * @example
+   * it('exports a normalized AIRI card payload', () => {})
+   */
+  it('exports a normalized AIRI card payload', () => {
+    const cardStore = useAiriCardStore()
+    cardStore.initialize()
+
+    const cardId = cardStore.addCard({
+      name: 'Exportable',
+      version: '1.2.3',
+      description: 'A card with AIRI module settings.',
+      greetings: ['Hello'],
+      extensions: {
+        airi: {
+          modules: {
+            consciousness: {
+              provider: 'provider-a',
+              model: 'model-a',
+            },
+            speech: {
+              provider: 'provider-b',
+              model: 'model-b',
+              voice_id: 'voice-b',
+            },
+          },
+          agents: {},
+        },
+      },
+    })
+
+    const exported = cardStore.exportCard(cardId)
+
+    expect(exported).toMatchObject({
+      format: 'airi-card:v1',
+      card: {
+        name: 'Exportable',
+        version: '1.2.3',
+        greetings: ['Hello'],
+        extensions: {
+          airi: {
+            modules: {
+              consciousness: {
+                provider: 'provider-a',
+                model: 'model-a',
+              },
+              speech: {
+                provider: 'provider-b',
+                model: 'model-b',
+                voice_id: 'voice-b',
+              },
+            },
+          },
+        },
+      },
+    })
+    expect(exported?.exportedAt).toEqual(expect.any(String))
+  })
+
+  /**
+   * @example
+   * it('imports an AIRI card export payload', () => {})
+   */
+  it('imports an AIRI card export payload', () => {
+    const cardStore = useAiriCardStore()
+    cardStore.initialize()
+
+    const importedId = cardStore.importCard({
+      format: 'airi-card:v1',
+      exportedAt: '2026-06-15T00:00:00.000Z',
+      card: {
+        name: 'Imported AIRI',
+        version: '2.0.0',
+        greetings: ['Hi'],
+        extensions: {
+          airi: {
+            modules: {
+              consciousness: {
+                provider: 'provider-a',
+                model: 'model-a',
+              },
+              speech: {
+                provider: 'provider-b',
+                model: 'model-b',
+                voice_id: 'voice-b',
+              },
+            },
+            agents: {},
+          },
+        },
+      },
+    })
+
+    expect(cardStore.getCard(importedId)).toMatchObject({
+      name: 'Imported AIRI',
+      version: '2.0.0',
+      greetings: ['Hi'],
+      extensions: {
+        airi: {
+          modules: {
+            consciousness: {
+              provider: 'provider-a',
+              model: 'model-a',
+            },
+            speech: {
+              provider: 'provider-b',
+              model: 'model-b',
+              voice_id: 'voice-b',
+            },
+          },
+        },
+      },
+    })
+  })
+
+  /**
+   * @example
+   * it('keeps CCV3 JSON import compatibility', () => {})
+   */
+  it('keeps CCV3 JSON import compatibility', () => {
+    const cardStore = useAiriCardStore()
+    cardStore.initialize()
+
+    const importedId = cardStore.importCard({
+      spec: 'chara_card_v3',
+      spec_version: '3.0',
+      data: {
+        name: 'Imported CCV3',
+        character_version: '3.0.0',
+        description: 'CCV3 description',
+        first_mes: 'Hello from CCV3',
+        alternate_greetings: ['Alt hello'],
+        group_only_greetings: [],
+        creator: '',
+        creator_notes: '',
+        personality: '',
+        scenario: '',
+        system_prompt: '',
+        post_history_instructions: '',
+        mes_example: '',
+        tags: [],
+        extensions: {},
+      },
+    })
+
+    expect(cardStore.getCard(importedId)).toMatchObject({
+      name: 'Imported CCV3',
+      version: '3.0.0',
+      description: 'CCV3 description',
+      greetings: ['Hello from CCV3', 'Alt hello'],
+    })
+  })
 })

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import type { ccv3 } from '@proj-airi/ccc'
+import kebabcase from '@stdlib/string-base-kebabcase'
 
+import { errorMessageFrom } from '@moeru/std'
 import { Alert } from '@proj-airi/stage-ui/components'
+import { useDownload } from '@proj-airi/stage-ui/composables/download'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { InputFileCard } from '@proj-airi/ui'
 import { ComboboxSelect } from '@proj-airi/ui/components/form'
@@ -18,7 +20,7 @@ import DeleteCardDialog from './components/DeleteCardDialog.vue'
 
 const { t } = useI18n()
 const cardStore = useAiriCardStore()
-const { addCard, removeCard } = cardStore
+const { exportCard, importCard, removeCard } = cardStore
 const { cards, activeCardId } = storeToRefs(cardStore)
 
 const route = useRoute()
@@ -41,6 +43,7 @@ const searchQuery = ref('')
 const sortOption = ref('nameAsc')
 
 const inputFiles = ref<File[]>([])
+const importError = ref('')
 
 // Card list data structure
 interface CardItem {
@@ -56,16 +59,21 @@ watch(inputFiles, async (newFiles) => {
   if (!file)
     return
 
+  importError.value = ''
   try {
     const content = await file.text()
-    const cardJSON = JSON.parse(content) as ccv3.CharacterCardV3
+    const cardJSON = JSON.parse(content) as unknown
 
     // Add card and select it
-    selectedCardId.value = addCard(cardJSON)
+    selectedCardId.value = importCard(cardJSON)
     isCardDialogOpen.value = true
   }
   catch (error) {
+    importError.value = errorMessageFrom(error) ?? t('settings.pages.card.import_error')
     console.error('Error processing card file:', error)
+  }
+  finally {
+    inputFiles.value = []
   }
 })
 
@@ -141,6 +149,32 @@ function handleEditCard(cardId: string) {
   }
   editingCardId.value = cardId
   isCardCreationDialogOpen.value = true
+}
+
+/**
+ * Normalizes card export filenames.
+ *
+ * Before:
+ * - "AIRI / ReLU!"
+ *
+ * After:
+ * - "airi-relu"
+ */
+function normalizeCardExportFilename(name: string) {
+  const normalized = kebabcase(name.trim()).replace(/^-+|-+$/g, '')
+
+  return normalized || 'airi-card'
+}
+
+function handleExportCard(cardId: string) {
+  const payload = exportCard(cardId)
+  if (!payload)
+    return
+
+  const json = JSON.stringify(payload, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const filename = `${normalizeCardExportFilename(payload.card.name)}.airi-card.json`
+  useDownload(blob, filename).download()
 }
 
 function handleCardCreationDialog() {
@@ -311,6 +345,7 @@ function getModuleShortName(id: string, module: 'consciousness' | 'voice') {
           @activate="activateCard(item.id)"
           @delete="confirmDelete(item.id)"
           @edit="handleEditCard(item.id)"
+          @export="handleExportCard(item.id)"
         />
       </template>
 
@@ -332,6 +367,15 @@ function getModuleShortName(id: string, module: 'consciousness' | 'voice') {
         </template>
         <template #content>
           {{ t('settings.pages.card.try_different_search') }}
+        </template>
+      </Alert>
+
+      <Alert v-if="importError" type="error">
+        <template #title>
+          {{ t('settings.pages.card.import_error') }}
+        </template>
+        <template #content>
+          {{ importError }}
         </template>
       </Alert>
     </div>

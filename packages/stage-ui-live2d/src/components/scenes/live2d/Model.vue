@@ -16,6 +16,8 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, toRef, watch } from 
 
 import {
   createBeatSyncController,
+  readCachedExpressionFile,
+  resolveExpressionRefs,
   useExpressionController,
   useLive2DMotionManagerUpdate,
   useMotionUpdatePluginAutoEyeBlink,
@@ -357,7 +359,7 @@ async function loadModel() {
     // Expression first: sets desired parameter values (e.g. closed eyes = 0).
     // Blink second: reads post-expression eye values, Multiply-modulates on top.
     // This ensures blink respects expression state (0 × blinkFactor = 0).
-    motionManagerUpdate.register(useMotionUpdatePluginExpression(expressionController), 'final')
+    motionManagerUpdate.register(useMotionUpdatePluginExpression(expressionController, live2dExpressionEnabled), 'final')
     motionManagerUpdate.register(useMotionUpdatePluginAutoEyeBlink(live2dExpressionEnabled), 'final')
     motionManagerUpdate.register(useMotionUpdatePluginLipSync(mouthOpenSize, nowSpeaking), 'final')
 
@@ -416,7 +418,9 @@ async function loadModel() {
     savedEyeBlink.value = internalModel.eyeBlink
     savedExpressionManager.value = motionManager.expressionManager
 
-    // --- Expression controller initialisation (conditional)
+    internalModelRef.value = internalModel
+
+    // --- Expression runtime override configuration (conditional)
     if (live2dExpressionEnabled.value) {
       // Disable built-in Cubism expression manager — our expression-controller
       // replaces it. The SDK's manager runs after motionManager.update() and
@@ -431,8 +435,6 @@ async function loadModel() {
       if (internalModel.eyeBlink) {
         ;(internalModel as any).eyeBlink = null
       }
-
-      internalModelRef.value = internalModel
     }
 
     emits('modelLoaded')
@@ -466,8 +468,7 @@ async function initExpressionController(internalModel?: PixiLive2DInternalModel)
   if (!settings)
     return
 
-  // model3.json stores expressions as { Name, File }[] under settings.expressions
-  const expressionRefs: { Name: string, File: string }[] = settings.expressions ?? []
+  const expressionRefs = resolveExpressionRefs(settings)
   if (expressionRefs.length === 0)
     return
 
@@ -475,6 +476,10 @@ async function initExpressionController(internalModel?: PixiLive2DInternalModel)
   // For URL-loaded models, resolveURL gives us the full URL. For ZIP-loaded
   // models the resolved URL points to an in-memory blob/object URL.
   const readExpFile = async (filePath: string): Promise<string> => {
+    const cached = readCachedExpressionFile(settings, filePath)
+    if (cached)
+      return cached
+
     const resolvedUrl: string = settings.resolveURL?.(filePath) ?? filePath
     const response = await fetch(resolvedUrl)
     if (!response.ok)
@@ -725,8 +730,7 @@ watch(live2dExpressionEnabled, (enabled) => {
   else {
     mm.expressionManager = savedExpressionManager.value
     im.eyeBlink = savedEyeBlink.value
-    expressionController.dispose()
-    internalModelRef.value = undefined
+    expressionController.resetAppliedExpressions(im.coreModel)
   }
 })
 
@@ -734,6 +738,8 @@ watch(focusAt, (value) => {
   if (!model.value)
     return
   if (!props.eyeTracking)
+    return
+  if (!props.eyeFocusSourceActive)
     return
 
   model.value.focus(value.x, value.y)

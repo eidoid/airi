@@ -2,7 +2,13 @@ import type { Display, screen as electronScreen, Point } from 'electron'
 
 import { defineEventa, defineInvokeEventa } from '@moeru/eventa'
 
-export const cursorScreenPoint = defineEventa<Point>('eventa:event:electron:screen:cursor-screen-point')
+export interface CursorScreenPoint extends Point {
+  source?: 'electron' | 'niri' | 'niri-window'
+  sourceWidth?: number
+  sourceHeight?: number
+}
+
+export const cursorScreenPoint = defineEventa<CursorScreenPoint>('eventa:event:electron:screen:cursor-screen-point')
 export const startLoopGetCursorScreenPoint = defineInvokeEventa('eventa:event:electron:screen:start-loop-get-cursor-screen-point')
 
 const getAllDisplays = defineInvokeEventa<Display[]>('eventa:invoke:electron:screen:get-all-displays')

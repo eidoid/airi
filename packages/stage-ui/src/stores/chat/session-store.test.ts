@@ -1,7 +1,7 @@
 import type { ChatSessionMeta, ChatSessionRecord, ChatSessionsIndex } from '../../types/chat-session'
 
-import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
 // Refs the store reads through the mocked `useAuthStore` / `useAiriCardStore`.
@@ -19,6 +19,7 @@ const getOutboxMock = vi.fn<(uid: string) => Promise<any[]>>()
 const dropOutboxForSessionMock = vi.fn<(uid: string, id: string) => Promise<void>>()
 const getTombstonesMock = vi.fn<(uid: string) => Promise<string[]>>()
 const removeTombstonesMock = vi.fn<(uid: string, ids: string[]) => Promise<void>>()
+let pinia: ReturnType<typeof createPinia>
 
 vi.mock('pinia', async () => {
   const actual = await vi.importActual<typeof import('pinia')>('pinia')
@@ -97,7 +98,8 @@ vi.mock('../../libs/chat-sync', () => ({
 const { useChatSessionStore } = await import('./session-store')
 
 beforeEach(() => {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   userIdRef.value = 'local'
   activeCardIdRef.value = 'default'
   systemPromptRef.value = ''
@@ -111,6 +113,10 @@ beforeEach(() => {
   dropOutboxForSessionMock.mockReset().mockResolvedValue(undefined)
   getTombstonesMock.mockReset().mockResolvedValue([])
   removeTombstonesMock.mockReset().mockResolvedValue(undefined)
+})
+
+afterEach(() => {
+  disposePinia(pinia)
 })
 
 async function flushMicrotasks(rounds = 8) {

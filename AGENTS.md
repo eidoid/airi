@@ -65,6 +65,11 @@ Concise but detailed reference for contributors working across the `moeru-ai/air
 
 > Use pnpm workspace filters to scope tasks. Examples below are generic; replace the filter with the target workspace name (e.g. `@proj-airi/stage-tamagotchi`, `@proj-airi/stage-web`, `@proj-airi/stage-ui`, etc.).
 
+### Nix environment
+
+- In Nix environments, always open a background terminal and enter the shell with `nix develop .#fhs` before running project commands.
+- During verification, retry commands that fail with network errors because the development environment network is unstable.
+
 - **Typecheck**
   - `pnpm -F <package.json name> typecheck`
   - Example: `pnpm -F @proj-airi/stage-tamagotchi typecheck` (runs `tsc` + `vue-tsc`).
@@ -238,6 +243,7 @@ Concise but detailed reference for contributors working across the `moeru-ai/air
 - Maintain structured `README.md` documentation for each `packages/` and `apps/` entry, covering what it does, how to use it, when to use it, and when not to use it.
 - Always run `pnpm type-check` and `pnpm lint` after finishing a task.
 - Use Conventional Commits for commit messages (e.g., `feat(<package name>): add runner reconnect backoff`).
+- When recent commits and the current working tree solve the same issue, squash/amend into the existing commit and push with `--force-with-lease` instead of adding a follow-up commit.
 - For new feature requirements or requirement-related tasks involving `node:*` built-in modules, DOM operations, Vue composables, React hooks, Vite plugins, or GitHub Actions workflows, always do deep research for suitable existing libraries or open source modules first. Before choosing any library, always ask the user to choose and help judge which option is right. Never choose generalized utility libraries on your own (for example, `es-toolkit`, utilities from `github.com/unjs`, or tiny tools from `github.com/tinylib`) without explicit user confirmation. If the user is working spec-driven, list candidate choices in a clear and concise Markdown comparison table.
 - Before planning or writing new utilities/functions, always search for existing internal implementations first. If the logic could become shared utilities, proactively propose that shared approach to users and developers.
 

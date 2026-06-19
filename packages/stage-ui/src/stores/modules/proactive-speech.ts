@@ -1,0 +1,504 @@
+import { errorMessageFrom } from '@moeru/std'
+import { nanoid } from 'nanoid'
+import { defineStore, storeToRefs } from 'pinia'
+import { computed, onScopeDispose, shallowRef, watch } from 'vue'
+
+import { extractMessageText } from '../../libs/chat-sync'
+import { useCharacterStore } from '../character'
+import { useChatOrchestratorStore } from '../chat'
+import { useChatSessionStore } from '../chat/session-store'
+import { useProvidersStore } from '../providers'
+import { useSettingsProactiveSpeech } from '../settings/proactive-speech'
+import { useAiriCardStore } from './airi-card'
+import { useConsciousnessStore } from './consciousness'
+import { useSpeechStore } from './speech'
+
+interface ProactiveSpeechTriggerOutcome {
+  /** Wall-clock timestamp the trigger started. */
+  startedAt: number
+  /** Reason a turn was skipped (no provider configured, etc.). `undefined` means a real turn ran. */
+  skippedReason?: string
+  /** Wall-clock timestamp the trigger completed (skipped or spoken). */
+  finishedAt: number
+  /** Spoken reply text when not skipped. */
+  text?: string
+  /** Error message when the LLM call failed mid-turn. */
+  error?: string
+}
+
+interface ProactiveSpeechTriggerOptions {
+  /** Manual triggers are user-requested and should run even when the schedule is disabled. */
+  manual?: boolean
+}
+
+/**
+ * Cooldown window after a user message before proactive speech resumes.
+ * Prevents AIRI from interrupting an active conversation.
+ */
+const USER_ACTIVITY_COOLDOWN_MS = 30_000
+
+/**
+ * Delay before triggering a greeting on a new session so the UI has time
+ * to settle (model loaded, lip-sync ready, etc.).
+ */
+const NEW_SESSION_GREETING_DELAY_MS = 2500
+
+/** Keep proactive prompts grounded without replaying long chat sessions. */
+const PROACTIVE_SPOKEN_OUTPUT_INSTRUCTION = [
+  'For proactive speech, return only the final text that should be spoken aloud.',
+  'Do not include hidden reasoning, planning, analysis, character-rule reminders, tool-use plans, or commentary about the reply.',
+  'If you call tools, still keep the text response to only the spoken line.',
+].join(' ')
+
+/**
+ * Resolves `{{...}}` placeholders inside the configured prompt template.
+ *
+ * Before:
+ * - 'It is {{now}}, last spoken at {{lastTriggeredAt}}, speak as {{cardName}}.'
+ *
+ * After (with `now = '14:32'`, `lastTriggeredAt = '14:27'`, `cardName = 'ReLU'`):
+ * - 'It is 14:32, last spoken at 14:27, speak as ReLU.'
+ */
+function fillPromptTemplate(
+  template: string,
+  replacements: Record<string, string>,
+): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
+    return replacements[key] ?? match
+  })
+}
+
+function formatLocalTimestamp(timestamp: number | null): string {
+  if (timestamp === null)
+    return '(never)'
+  const date = new Date(timestamp)
+  const pad = (value: number) => value.toString().padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function sampleIntervalMs(min: number, max: number): number {
+  const safeMin = Math.max(0, Math.min(min, max))
+  const safeMax = Math.max(safeMin, max)
+  return safeMin + Math.random() * (safeMax - safeMin)
+}
+
+export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
+  const settings = useSettingsProactiveSpeech()
+  const consciousness = useConsciousnessStore()
+  const cardStore = useAiriCardStore()
+  const speechStore = useSpeechStore()
+  const providersStore = useProvidersStore()
+  const characterStore = useCharacterStore()
+  const chatSessionStore = useChatSessionStore()
+  const chatOrchestrator = useChatOrchestratorStore()
+
+  const { enabled, intervalMinMs, intervalMaxMs, promptTemplate, systemPromptOverride, maxTokens } = storeToRefs(settings)
+  const { activeProvider: activeChatProviderId, activeModel: activeChatModel } = storeToRefs(consciousness)
+  const { activeSessionId } = storeToRefs(chatSessionStore)
+  const { sending: isOrchestratorSending } = storeToRefs(chatOrchestrator)
+
+  const activeSessionGeneration = computed(() => {
+    const sessionId = activeSessionId.value
+    if (!sessionId)
+      return 0
+
+    return chatSessionStore.getSessionGeneration(sessionId)
+  })
+
+  const activeSessionHasConversationMessages = computed(() => {
+    const sessionId = activeSessionId.value
+    if (!sessionId)
+      return false
+
+    return chatSessionStore.getSessionMessages(sessionId).some(message => message.role !== 'system')
+  })
+
+  const isRunning = shallowRef(false)
+  const isThinking = shallowRef(false)
+  const lastTriggeredAt = shallowRef<number | null>(null)
+  const lastError = shallowRef<string | null>(null)
+  const lastOutcome = shallowRef<ProactiveSpeechTriggerOutcome | null>(null)
+
+  /** Wall-clock timestamp (Date.now()) when the next trigger will fire. `null` when no timer is armed. */
+  const nextTriggerAt = shallowRef<number | null>(null)
+
+  /**
+   * Session generations that have already received a greeting.
+   * `cleanupMessages()` bumps the generation for the same session id, so the
+   * next empty history can receive the card greeting again.
+   */
+  const greetedSessionGenerations = shallowRef(new Map<string, number>())
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let greetingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
+
+  function clearTimer() {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle)
+      timeoutHandle = null
+      nextTriggerAt.value = null
+    }
+  }
+
+  function clearGreetingTimer() {
+    if (greetingTimeoutHandle !== null) {
+      clearTimeout(greetingTimeoutHandle)
+      greetingTimeoutHandle = null
+    }
+  }
+
+  function hasCardGreeting(): boolean {
+    return cardStore.activeCard?.greetings
+      ?.map(g => g.trim())
+      .some(Boolean) ?? false
+  }
+
+  function scheduleGreetingTrigger() {
+    clearTimer()
+    clearGreetingTimer()
+    greetingTimeoutHandle = setTimeout(() => {
+      greetingTimeoutHandle = null
+      void runTrigger()
+    }, NEW_SESSION_GREETING_DELAY_MS)
+  }
+
+  function scheduleStartupGreetingIfNeeded() {
+    const sessionId = activeSessionId.value
+    if (!enabled.value || !sessionId)
+      return
+    if (isThinking.value)
+      return
+    if (!hasCardGreeting())
+      return
+    if (!needsGreeting(sessionId))
+      return
+
+    scheduleGreetingTrigger()
+  }
+
+  function armTimer() {
+    clearTimer()
+    if (disposed)
+      return
+    if (!isRunning.value)
+      return
+    if (!enabled.value)
+      return
+    const delay = sampleIntervalMs(intervalMinMs.value, intervalMaxMs.value)
+    nextTriggerAt.value = Date.now() + delay
+    timeoutHandle = setTimeout(() => {
+      void runTrigger()
+    }, delay)
+  }
+
+  function start() {
+    if (isRunning.value)
+      return
+    isRunning.value = true
+    lastError.value = null
+    armTimer()
+    scheduleStartupGreetingIfNeeded()
+  }
+
+  function stop() {
+    isRunning.value = false
+    clearTimer()
+    clearGreetingTimer()
+  }
+
+  /**
+   * Card greetings do not pass through the chat runtime, so direct speech
+   * output is optional and only runs when the speech pipeline is configured.
+   */
+  function canEmitDirectSpeech(): boolean {
+    return speechStore.configured
+  }
+
+  /**
+   * Skip guard for generated proactive turns. Card greetings only need speech
+   * synthesis, while LLM-generated thoughts additionally need a chat provider
+   * and model.
+   */
+  function generatedSpeechSkipReason(): string | undefined {
+    if (!activeChatProviderId.value)
+      return 'no chat provider configured'
+    if (!activeChatModel.value)
+      return 'no chat model configured'
+    return undefined
+  }
+
+  /**
+   * Picks a random greeting from the active card's greetings array.
+   * Returns `undefined` when the card has no greetings configured.
+   */
+  function pickGreeting(): string | undefined {
+    const greetings = cardStore.activeCard?.greetings
+      ?.map(g => g.trim())
+      .filter(Boolean) ?? []
+
+    if (greetings.length === 0)
+      return undefined
+
+    return greetings[Math.floor(Math.random() * greetings.length)]
+  }
+
+  /**
+   * Checks whether the user is currently active — either the orchestrator is
+   * sending a message (LLM generating) or a user message was sent within the
+   * cooldown window.
+   *
+   * Use when:
+   * - Deciding whether to skip a proactive speech trigger.
+   */
+  function isUserActive(): boolean {
+    if (isOrchestratorSending.value)
+      return true
+
+    const sessionId = activeSessionId.value
+    if (!sessionId)
+      return false
+
+    const messages = chatSessionStore.getSessionMessages(sessionId)
+    if (messages.length === 0)
+      return false
+
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage.role === 'user' && Date.now() - (lastMessage.createdAt ?? 0) < USER_ACTIVITY_COOLDOWN_MS)
+      return true
+
+    return false
+  }
+
+  /**
+   * Writes proactive speech output to the active session so the user can
+   * review what AIRI said in the chat history.
+   */
+  function writeToSession(text: string) {
+    const sessionId = activeSessionId.value
+    if (!sessionId)
+      return
+
+    chatSessionStore.appendSessionMessage(sessionId, {
+      role: 'assistant',
+      content: text,
+      slices: [{ type: 'text', text }],
+      tool_results: [],
+      id: nanoid(),
+      createdAt: Date.now(),
+    })
+  }
+
+  /**
+   * Determines whether the current session should receive a card greeting
+   * as its first proactive speech output.
+   *
+   * A session qualifies when the current generation has not been greeted yet,
+   * or when synced history has been cleared back to only system messages.
+   * Existing assistant messages still suppress greetings after reload.
+   */
+  function needsGreeting(sessionId: string): boolean {
+    const currentGeneration = chatSessionStore.getSessionGeneration(sessionId)
+    const messages = chatSessionStore.getSessionMessages(sessionId)
+    const hasConversationMessages = messages.some(m => m.role !== 'system')
+
+    if (greetedSessionGenerations.value.get(sessionId) === currentGeneration && hasConversationMessages)
+      return false
+
+    const hasAssistantMessage = messages.some(m => m.role === 'assistant')
+
+    if (hasAssistantMessage) {
+      // Already has assistant messages — mark as greeted so we don't
+      // keep checking on every trigger.
+      greetedSessionGenerations.value.set(sessionId, currentGeneration)
+      return false
+    }
+
+    return true
+  }
+
+  async function generateReply(): Promise<string | undefined> {
+    const providerInstance = await providersStore.getProviderInstance(activeChatProviderId.value)
+    if (!providerInstance)
+      throw new Error(`Chat provider "${activeChatProviderId.value}" is unavailable.`)
+
+    const userPrompt = fillPromptTemplate(promptTemplate.value, {
+      cardName: cardStore.activeCard?.name ?? 'AIRI',
+      now: formatLocalTimestamp(Date.now()),
+      lastTriggeredAt: formatLocalTimestamp(lastTriggeredAt.value),
+    })
+
+    const assistantMessage = await chatOrchestrator.generateAssistant(userPrompt, {
+      model: activeChatModel.value,
+      chatProvider: providerInstance as Parameters<typeof chatOrchestrator.generateAssistant>[1]['chatProvider'],
+      maxTokens: maxTokens.value,
+      systemPromptOverride: systemPromptOverride.value.trim().length > 0 ? systemPromptOverride.value : undefined,
+      systemPromptSupplement: PROACTIVE_SPOKEN_OUTPUT_INSTRUCTION,
+    })
+
+    return assistantMessage ? extractMessageText(assistantMessage).trim() : undefined
+  }
+
+  async function runTrigger(options: ProactiveSpeechTriggerOptions = {}): Promise<ProactiveSpeechTriggerOutcome | null> {
+    if ((!enabled.value && !options.manual) || disposed)
+      return null
+    if (isThinking.value) {
+      armTimer()
+      return null
+    }
+
+    clearGreetingTimer()
+
+    // Arm the next timer immediately so the next trigger is always scheduled
+    // while this trigger is in flight.
+    armTimer()
+
+    const startedAt = Date.now()
+    isThinking.value = true
+
+    try {
+      // Suppress when the user is actively chatting.
+      if (isUserActive()) {
+        const outcome: ProactiveSpeechTriggerOutcome = {
+          startedAt,
+          finishedAt: Date.now(),
+          skippedReason: 'user is active',
+        }
+        lastOutcome.value = outcome
+        return outcome
+      }
+
+      const sessionId = activeSessionId.value
+      let text: string | undefined
+      let handledByChatRuntime = false
+
+      // First trigger for a new session: prefer a card greeting.
+      if (sessionId && needsGreeting(sessionId)) {
+        text = pickGreeting()
+        greetedSessionGenerations.value.set(sessionId, chatSessionStore.getSessionGeneration(sessionId))
+      }
+
+      // No greeting (or already greeted): generate via LLM.
+      if (!text) {
+        const reason = generatedSpeechSkipReason()
+        if (reason) {
+          const outcome: ProactiveSpeechTriggerOutcome = {
+            startedAt,
+            finishedAt: Date.now(),
+            skippedReason: reason,
+          }
+          lastOutcome.value = outcome
+          return outcome
+        }
+
+        try {
+          text = await generateReply()
+          handledByChatRuntime = true
+        }
+        catch (error) {
+          const outcome: ProactiveSpeechTriggerOutcome = {
+            startedAt,
+            finishedAt: Date.now(),
+            error: errorMessageFrom(error) ?? 'Unknown error',
+          }
+          lastError.value = outcome.error ?? null
+          lastOutcome.value = outcome
+          return outcome
+        }
+      }
+
+      if (!text) {
+        const outcome: ProactiveSpeechTriggerOutcome = {
+          startedAt,
+          finishedAt: Date.now(),
+          skippedReason: 'no text to speak',
+        }
+        lastOutcome.value = outcome
+        return outcome
+      }
+
+      // Write to session history so the user can review what was said.
+      if (!handledByChatRuntime)
+        writeToSession(text)
+
+      // Generated turns are handled by the normal chat runtime hooks. Card
+      // greetings are local proactive output, so emit them directly only when
+      // a speech pipeline exists.
+      if (!handledByChatRuntime && canEmitDirectSpeech())
+        await characterStore.emitTextOutput(text)
+
+      lastTriggeredAt.value = Date.now()
+      const outcome: ProactiveSpeechTriggerOutcome = {
+        startedAt,
+        finishedAt: lastTriggeredAt.value,
+        text,
+      }
+      lastOutcome.value = outcome
+      lastError.value = null
+      return outcome
+    }
+    finally {
+      isThinking.value = false
+    }
+  }
+
+  // Re-arm the timer whenever the enabled toggle or interval window changes so
+  // settings updates take effect on the next scheduled tick without restart.
+  // `immediate: true` covers the persisted "enabled" state at app boot — the
+  // store has no other entry point that fires on instantiation.
+  watch(
+    [enabled, intervalMinMs, intervalMaxMs],
+    () => {
+      if (!enabled.value) {
+        stop()
+        return
+      }
+      if (!isRunning.value) {
+        start()
+        return
+      }
+      armTimer()
+    },
+    { immediate: true },
+  )
+
+  // When the active session changes or its history is reset while proactive
+  // speech is enabled, trigger a greeting (card permitting) so the user hears
+  // AIRI right away instead of waiting for the first timer tick.
+  watch(
+    [activeSessionId, enabled, activeSessionGeneration, activeSessionHasConversationMessages],
+    ([newId, isEnabled, newGeneration, hasConversationMessages], [oldId, _wasEnabled, oldGeneration, hadConversationMessages]) => {
+      if (!isEnabled || !newId)
+        return
+      const isSameSession = newId === oldId
+      const generationChanged = newGeneration !== oldGeneration
+      const historyWasCleared = hadConversationMessages && !hasConversationMessages
+
+      if (isSameSession && !generationChanged && !historyWasCleared)
+        return
+      if (isThinking.value)
+        return
+
+      scheduleGreetingTrigger()
+    },
+  )
+
+  onScopeDispose(() => {
+    disposed = true
+    clearTimer()
+    clearGreetingTimer()
+  })
+
+  return {
+    isRunning,
+    isThinking,
+    lastTriggeredAt,
+    lastError,
+    lastOutcome,
+    nextTriggerAt,
+    start,
+    stop,
+    trigger: runTrigger,
+  }
+})

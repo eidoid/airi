@@ -37,6 +37,7 @@ const {
   live2dMaxFps,
   live2dRenderScale,
   live2dForceIdleEyeAnimation,
+  live2dIdleEyeAnimationDelayMs,
 } = storeToRefs(settings)
 
 const live2d = useLive2dParams()
@@ -48,25 +49,15 @@ const {
 } = storeToRefs(live2d)
 
 const expressionStore = useExpressionStore()
-const { expressions, expressionGroups } = storeToRefs(expressionStore)
-
-/**
- * Check if an expression group is currently active.
- * Only considers non-zero exp3 params (zero-valued params are "reset" instructions).
- * A group is active when at least one of its activation params matches the exp3 value.
- */
-function isGroupActive(group: { parameters: { parameterId: string, value: number }[] }): boolean {
-  return group.parameters.some((p) => {
-    if (p.value === 0)
-      return false // Skip reset params
-    const entry = expressions.value.get(p.parameterId)
-    return entry != null && entry.currentValue === p.value
-  })
-}
+const { expressionGroups } = storeToRefs(expressionStore)
 
 const selectedRuntimeMotion = ref<string>('')
 const runtimeMotions = ref<Array<{ name: string, displayPath: string, group: string, index: number }>>([])
 const canExtractColors = computed(() => props.runtimeSnapshot.canCapturePreview)
+const live2dIdleEyeAnimationDelaySeconds = computed({
+  get: () => live2dIdleEyeAnimationDelayMs.value / 1000,
+  set: value => live2dIdleEyeAnimationDelayMs.value = Math.round(value * 1000),
+})
 const runtimeMotionOptions = computed(() => {
   const options = runtimeMotions.value.map(motion => ({
     label: motion.name,
@@ -364,6 +355,15 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
       :label="t('settings.live2d.animation.force-idle-eye-animation.title')"
       :description="t('settings.live2d.animation.force-idle-eye-animation.description')"
       placement="right"
+    />
+    <FieldRange
+      v-if="live2dForceIdleEyeAnimation"
+      v-model="live2dIdleEyeAnimationDelaySeconds"
+      as="div"
+      :min="0"
+      :max="30"
+      :step="0.5"
+      :label="t('settings.live2d.animation.idle-eye-delay.title')"
     />
     <FieldCheckbox
       v-model="live2dAutoBlinkEnabled"
@@ -723,7 +723,7 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
     <div v-if="!live2dExpressionEnabled" py-2 text-xs text-neutral-500 dark:text-neutral-400>
       {{ t('settings.live2d.expressions.sdk-preset-preserved-notice') }}
     </div>
-    <template v-else-if="expressionGroups.size === 0">
+    <template v-if="expressionGroups.size === 0">
       <div py-2 text-sm text-neutral-500 dark:text-neutral-400>
         {{ t('settings.live2d.expressions.no-expression') }}
       </div>
@@ -732,13 +732,14 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
       <!-- Expression preview toggles -->
       <div flex flex-col gap-2>
         <div
-          v-for="[groupName, group] in expressionGroups"
+          v-for="[groupName] in expressionGroups"
           :key="groupName"
           flex items-center justify-between
         >
           <span text-sm text-neutral-700 dark:text-neutral-300>{{ groupName }}</span>
           <Checkbox
-            :model-value="isGroupActive(group)"
+            :model-value="expressionStore.isGroupActive(groupName)"
+            :disabled="!live2dExpressionEnabled"
             @update:model-value="expressionStore.toggle(groupName)"
           />
         </div>
@@ -753,11 +754,7 @@ function handleMotionSelect(selectedMotionPath: string | number | undefined) {
           @update:model-value="(v: string) => expressionStore.setLlmMode(v as 'all' | 'none' | 'custom')"
         />
       </div>
-      <span v-if="expressionStore.llmMode !== 'none'" text-xs text-neutral-500 dark:text-neutral-400>
-        {{ t('settings.live2d.expressions.llm-integration-wip') }}
-      </span>
 
-      <!-- Custom per-expression LLM toggles (only when mode = 'custom') -->
       <div v-if="expressionStore.llmMode === 'custom'" mt-2 flex flex-col gap-2 border-l-2 border-neutral-200 pl-3 dark:border-neutral-700>
         <div
           v-for="[groupName] in expressionGroups"

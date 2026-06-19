@@ -40,7 +40,7 @@ const airiCardStore = useAiriCardStore()
 const { messages } = storeToRefs(chatSession)
 const { streamingMessage } = storeToRefs(chatStream)
 const { sending } = storeToRefs(chatOrchestrator)
-const { activeCardId } = storeToRefs(airiCardStore)
+const { activeCard, activeCardId } = storeToRefs(airiCardStore)
 const { t } = useI18n()
 const { openImagePreview } = journalPreviewStore
 const isComposing = ref(false)
@@ -58,6 +58,7 @@ const sendModeLabels = computed<Record<SendMode, string>>(() => ({
   'ctrl-enter': t('stage.send-mode.ctrl-enter'),
   'double-enter': t('stage.send-mode.double-enter'),
 }))
+const assistantLabel = computed(() => activeCard.value?.name?.trim() || undefined)
 const {
   trackChatMessageDeleted,
   trackChatMessageRetried,
@@ -243,6 +244,7 @@ async function handleCleanupMessages() {
         :messages="historyMessages"
         :sending="sending"
         :streaming-message="streamingMessage"
+        :assistant-label="assistantLabel"
         :tool-call-renderers="toolCallRenderers"
         @delete-message="handleDeleteMessage($event.index)"
         @retry-message="handleRetryMessage($event.index)"

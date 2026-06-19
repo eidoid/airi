@@ -53,6 +53,7 @@ import { initializeElectronAuthCallbackBridge } from './bridges/electron-auth-ca
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useLanguage } from './composables/use-language'
 import { createChatSyncWindowLifecycle, resolveInitialChatSyncRoutePath } from './stores/chat-sync-lifecycle'
+import { useTamagotchiExpressionToolsStore } from './stores/expression-tools'
 import { useTamagotchiMcpToolsStore } from './stores/mcp-tools'
 import { useTamagotchiPluginToolsStore } from './stores/plugin-tools'
 import { useServerChannelSettingsStore } from './stores/settings/server-channel'
@@ -82,6 +83,7 @@ function createFullStageRuntime() {
   const analyticsStore = useSharedAnalyticsStore()
   const inferencePreload = useInferencePreload()
   const pluginHostInspectorStore = usePluginHostInspectorStore()
+  const expressionToolsStore = useTamagotchiExpressionToolsStore()
   const mcpToolsStore = useTamagotchiMcpToolsStore()
   const pluginToolsStore = useTamagotchiPluginToolsStore()
   const stageWindowLifecycleStore = useStageWindowLifecycleStore()
@@ -164,6 +166,9 @@ function createFullStageRuntime() {
   void mcpToolsStore.refresh().catch((error) => {
     console.warn('[App] Failed to refresh MCP runtime tools:', error)
   })
+  void expressionToolsStore.refresh().catch((error) => {
+    console.warn('[App] Failed to refresh Live2D expression tools:', error)
+  })
   void refreshPluginRuntimeTools()
 
   watch([activeProvider, artistryGlobals, activeModel, defaultPromptPrefix, providerOptions], () => {
@@ -243,6 +248,7 @@ function createFullStageRuntime() {
     dispose() {
       if (!isAuxiliaryChatRoute)
         contextBridgeStore.dispose()
+      expressionToolsStore.dispose()
       mcpToolsStore.dispose()
       pluginToolsStore.dispose()
     },

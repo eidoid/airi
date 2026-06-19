@@ -225,6 +225,7 @@ export async function streamFrom({
         abortSignal: options?.abortSignal,
         messages: sanitized,
         headers: options?.headers,
+        ...(options?.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
         stopWhen: stepCountAtLeast(10),
         // NOTICE:
         // Do not pass xsAI's `captureToolErrors` option here. In the installed

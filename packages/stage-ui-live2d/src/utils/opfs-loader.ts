@@ -18,7 +18,7 @@ interface OPFSCacheMeta {
  *
  * Increment when the persisted directory shape changes.
  */
-const live2DOpfsCacheVersion = 2
+const live2DOpfsCacheVersion = 3
 
 interface IgnoredArchivePathSegmentRule {
   matches: (segment: string) => boolean
@@ -141,10 +141,11 @@ export class OPFSCache {
 
       const meta = await OPFSCache.readMeta(dirHandle)
       if (meta?.version !== live2DOpfsCacheVersion) {
-        // NOTICE: Rebuild caches created before OPFS stored the full zip directory.
-        // Older caches may contain a reconstructed model3.json instead of the
-        // original archive settings file.
-        // Source/context: OPFSCache.saveMiddleware settings reconstruction.
+        // NOTICE: Rebuild caches created before OPFS reliably preserved the full
+        // Live2D archive directory, including expression files.
+        // Older caches may contain a reconstructed model3.json or a resource set
+        // that cannot satisfy expression file lookups after model load.
+        // Source/context: OPFSCache.saveMiddleware and Live2D expression loading.
         // Removal condition: old OPFS caches no longer need migration support.
         // eslint-disable-next-line no-console
         console.debug(`[OPFS] Cache mismatch for ${key}, schema version changed`)

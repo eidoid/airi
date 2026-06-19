@@ -549,6 +549,7 @@ describe('chat orchestrator contract', () => {
 
     expect(store.$id).toBe('chat-orchestrator')
     expect(typeof store.ingest).toBe('function')
+    expect(typeof store.generateAssistant).toBe('function')
     expect(typeof store.ingestOnFork).toBe('function')
     expect(typeof store.cancelPendingSends).toBe('function')
     expect(typeof store.onBeforeSend).toBe('function')
@@ -571,5 +572,35 @@ describe('chat orchestrator contract', () => {
       hidden: true,
     })
     expect(ensureSessionMock).toHaveBeenCalledWith('session-forked')
+  })
+
+  it('exposes assistant-initiated runtime turns through the store facade', async () => {
+    getContextsSnapshotMock.mockReturnValue({})
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, messages: Message[], options: any) => {
+      expect(messages.at(-1)).toMatchObject({
+        role: 'user',
+        content: expect.stringContaining('proactive prompt'),
+      })
+      expect(options.maxTokens).toBe(64)
+      await options.onStreamEvent({ type: 'text-delta', text: 'proactive reply' })
+      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+    })
+
+    const store = useChatOrchestratorStore()
+    const assistant = await store.generateAssistant('proactive prompt', {
+      model: 'gpt-test',
+      chatProvider: provider,
+      maxTokens: 64,
+      systemPromptSupplement: 'Only spoken text.',
+    })
+
+    expect(assistant?.content).toBe('proactive reply')
+    expect(sessionMessages['session-1']).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'proactive reply',
+      }),
+    ])
   })
 })

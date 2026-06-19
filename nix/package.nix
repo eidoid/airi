@@ -67,11 +67,14 @@ in
   buildPhase = ''
     runHook preBuild
 
-    pnpm run build:packages
+    # Keep the default flake build portable across NixOS machines that do not
+    # provide the Godot/.NET toolchain yet. AIRI's Electron package build does
+    # not consume the Godot sidecar workspace output.
+    pnpm exec turbo run build --filter='./packages/*' --filter='!@proj-airi/stage-tamagotchi-godot'
     cd apps/stage-tamagotchi
     pnpm run build
     pnpm exec electron-builder build \
-      --dir --${if stdenvNoCC.isLinux then "linux" else "mac"} \
+      --${if stdenvNoCC.isLinux then "linux" else "mac"} dir \
       -c.electronDist="${electron.dist}" \
       -c.electronVersion="${electron.version}"
 

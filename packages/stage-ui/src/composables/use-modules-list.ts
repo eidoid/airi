@@ -12,6 +12,7 @@ import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
+import { useProactiveSpeechStore } from '../stores/modules/proactive-speech'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useTwitterStore } from '../stores/modules/twitter'
 import { useVisionStore } from '../stores/modules/vision'
@@ -41,6 +42,7 @@ export function useModulesList() {
   const minecraftStore = useMinecraftStore()
   const factorioStore = useFactorioStore()
   const artistryStore = useArtistryStore()
+  const proactiveSpeechStore = useProactiveSpeechStore()
   const beatSyncState = ref<BeatSyncDetectorState>()
 
   minecraftStore.initialize()
@@ -161,6 +163,15 @@ export function useModulesList() {
       icon: 'i-solar:music-notes-bold-duotone',
       to: '/settings/modules/beat-sync',
       configured: beatSyncState.value?.isActive ?? false,
+      category: 'essential',
+    },
+    {
+      id: 'proactive-speech',
+      name: t('settings.pages.modules.proactive-speech.title'),
+      description: t('settings.pages.modules.proactive-speech.description'),
+      icon: 'i-solar:chat-square-call-bold-duotone',
+      to: '/settings/modules/proactive-speech',
+      configured: proactiveSpeechStore.isRunning,
       category: 'essential',
     },
   ])

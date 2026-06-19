@@ -555,7 +555,8 @@ Dynamic key-value pair list with add/remove.
 
 ### FieldValues
 
-Dynamic string list with add/remove.
+Dynamic string list with add/remove. The component updates `v-model` by replacing
+the array so computed setters and parent watchers are triggered reliably.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|

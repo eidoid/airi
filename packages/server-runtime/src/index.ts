@@ -31,7 +31,7 @@ import {
   MessageHeartbeat,
   MessageHeartbeatKind,
 } from '@proj-airi/server-shared/types'
-import { H3 } from 'h3'
+import { eventHandler, getHeader, getRouterParam, H3 } from 'h3'
 import { nanoid } from 'nanoid'
 
 import { optionOrEnv } from './config'
@@ -142,6 +142,10 @@ export interface AppOptions {
   auth?: {
     token: string
   }
+  actions?: {
+    timeoutMs?: number
+    invoke: (action: string) => Promise<unknown> | unknown
+  }
   logger?: {
     app?: { level?: LogLevelString, format?: Format }
     websocket?: { level?: LogLevelString, format?: Format }
@@ -154,6 +158,33 @@ export interface AppOptions {
   heartbeat?: {
     readTimeout?: number
     message?: MessageHeartbeat | string
+  }
+}
+
+function parseBearerToken(authorization?: string) {
+  if (!authorization)
+    return ''
+
+  const [scheme, token] = authorization.split(/\s+/, 2)
+  if (scheme?.toLowerCase() !== 'bearer')
+    return ''
+
+  return token ?? ''
+}
+
+async function runWithTimeout<T>(task: () => Promise<T> | T, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      task(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('AIRI action timed out')), timeoutMs)
+      }),
+    ])
+  }
+  finally {
+    if (timeout)
+      clearTimeout(timeout)
   }
 }
 
@@ -225,6 +256,44 @@ export function setupApp(options?: AppOptions): { app: H3, closeAllPeers: () => 
   const app = new H3({
     onError: error => appLogger.withError(error).error('an error occurred'),
   })
+
+  app.post('/api/actions/:action', eventHandler(async (event) => {
+    if (!options?.actions) {
+      return new Response(JSON.stringify({ ok: false, error: 'AIRI actions are not available.' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    }
+
+    const requestedToken = parseBearerToken(getHeader(event, 'authorization'))
+    if (authToken && !timingSafeCompare(requestedToken, authToken)) {
+      return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    }
+
+    const action = getRouterParam(event, 'action')
+    if (!action) {
+      return new Response(JSON.stringify({ ok: false, error: 'Action is required.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    }
+
+    try {
+      const result = await runWithTimeout(() => options.actions!.invoke(action), options.actions.timeoutMs ?? 5000)
+      return new Response(JSON.stringify({ ok: true, action, result }), {
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    }
+    catch (error) {
+      return new Response(JSON.stringify({ ok: false, action, error: errorMessageFrom(error) ?? 'AIRI action failed.' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    }
+  }))
 
   // === Registries & Orchestrators ===
   // TODO: Move protocol-neutral peer registry, consumer selection, and heartbeat

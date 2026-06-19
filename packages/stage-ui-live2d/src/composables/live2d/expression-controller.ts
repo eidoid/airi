@@ -33,6 +33,12 @@ interface Exp3Json {
 // Controller
 // ---------------------------------------------------------------------------
 
+const EXPRESSION_TRANSITION_TIME_CONSTANT_MS = 80
+const EXPRESSION_TRANSITION_MAX_DELTA_MS = 50
+const EXPRESSION_TRANSITION_EPSILON = 0.001
+
+let expressionControllerId = 0
+
 export interface ExpressionControllerOptions {
   /**
    * The loaded Live2D internal model reference (reactive so it can be null
@@ -55,10 +61,13 @@ export interface ExpressionControllerOptions {
  */
 export function useExpressionController(options: ExpressionControllerOptions) {
   const store = useExpressionStore()
+  const ownerId = `live2d-expression-controller:${++expressionControllerId}`
 
-  // Track which parameter IDs were written in the previous frame so we can
-  // detect active→inactive transitions and explicitly reset them.
-  const activeLastFrame = new Set<string>()
+  // Rendered expression values are separated from store state: settings and
+  // LLM tools should see the requested expression immediately, while the model
+  // receives a short per-frame ease toward that value.
+  const renderedExpressionValues = new Map<string, number>()
+  let lastExpressionApplyAt: number | undefined
 
   // ---- Initialisation (called once after model load) ----------------------
 
@@ -129,6 +138,7 @@ export function useExpressionController(options: ExpressionControllerOptions) {
       options.modelId ?? 'unknown',
       groups,
       Array.from(entryMap.values()),
+      ownerId,
     )
   }
 
@@ -152,31 +162,36 @@ export function useExpressionController(options: ExpressionControllerOptions) {
    * @param coreModel - The Cubism core model (coreModel from internalModel).
    */
   function applyExpressions(coreModel: PixiLive2DInternalModel['coreModel']) {
-    const activeThisFrame = new Set<string>()
+    const alpha = transitionAlpha()
 
     for (const entry of store.expressions.values()) {
-      if (isNoopValue(entry))
+      const renderedValue = renderedExpressionValues.get(entry.parameterId)
+      if (isNoopValue(entry) && renderedValue == null)
         continue
 
-      const blendedValue = computeTargetValue(entry, coreModel)
+      const identity = identityValue(entry)
+      const previousValue = renderedValue ?? identity
+      const nextValue = stepExpressionValue(previousValue, entry.currentValue, alpha)
 
-      coreModel.setParameterValueById(entry.parameterId, blendedValue)
-      activeThisFrame.add(entry.parameterId)
-    }
-
-    // Reset parameters that were active last frame but not this frame.
-    // This handles the active→inactive transition (e.g. toggle OFF).
-    for (const paramId of activeLastFrame) {
-      if (!activeThisFrame.has(paramId)) {
-        const entry = findEntryByParameterId(paramId)
-        if (entry)
-          coreModel.setParameterValueById(paramId, entry.modelDefault)
+      if (isNoopValue(entry) && closeEnough(nextValue, identity)) {
+        renderedExpressionValues.delete(entry.parameterId)
+        coreModel.setParameterValueById(entry.parameterId, entry.modelDefault)
+        continue
       }
-    }
 
-    activeLastFrame.clear()
-    for (const id of activeThisFrame)
-      activeLastFrame.add(id)
+      renderedExpressionValues.set(entry.parameterId, nextValue)
+      coreModel.setParameterValueById(entry.parameterId, computeTargetValueForValue(entry, coreModel, nextValue))
+    }
+  }
+
+  function resetAppliedExpressions(coreModel: PixiLive2DInternalModel['coreModel']) {
+    for (const paramId of renderedExpressionValues.keys()) {
+      const entry = findEntryByParameterId(paramId)
+      if (entry)
+        coreModel.setParameterValueById(paramId, entry.modelDefault)
+    }
+    renderedExpressionValues.clear()
+    lastExpressionApplyAt = undefined
   }
 
   /**
@@ -206,16 +221,47 @@ export function useExpressionController(options: ExpressionControllerOptions) {
    *   always write a fresh value before the expression plugin runs.
    * - **Overwrite**: direct replacement.
    */
-  function computeTargetValue(entry: ExpressionEntry, coreModel: PixiLive2DInternalModel['coreModel']): number {
+  function computeTargetValueForValue(entry: ExpressionEntry, coreModel: PixiLive2DInternalModel['coreModel'], value: number): number {
     switch (entry.blend) {
       case 'Add':
-        return entry.modelDefault + entry.currentValue
+        return entry.modelDefault + value
       case 'Multiply': {
         const currentFrameValue = coreModel.getParameterValueById(entry.parameterId) as number
-        return currentFrameValue * entry.currentValue
+        return currentFrameValue * value
       }
       default:
-        return entry.currentValue
+        return value
+    }
+  }
+
+  function transitionAlpha(): number {
+    const now = performance.now()
+    const deltaMs = lastExpressionApplyAt == null
+      ? 16
+      : Math.min(Math.max(now - lastExpressionApplyAt, 0), EXPRESSION_TRANSITION_MAX_DELTA_MS)
+    lastExpressionApplyAt = now
+    return 1 - Math.exp(-deltaMs / EXPRESSION_TRANSITION_TIME_CONSTANT_MS)
+  }
+
+  function stepExpressionValue(from: number, to: number, alpha: number): number {
+    if (closeEnough(from, to))
+      return to
+
+    return from + (to - from) * alpha
+  }
+
+  function closeEnough(a: number, b: number): boolean {
+    return Math.abs(a - b) <= EXPRESSION_TRANSITION_EPSILON
+  }
+
+  function identityValue(entry: ExpressionEntry): number {
+    switch (entry.blend) {
+      case 'Add':
+        return 0
+      case 'Multiply':
+        return 1
+      default:
+        return entry.modelDefault
     }
   }
 
@@ -231,7 +277,8 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   // ---- Cleanup -------------------------------------------------------------
 
   function dispose() {
-    store.dispose()
+    renderedExpressionValues.clear()
+    store.dispose(ownerId)
   }
 
   // ---- Private helpers -----------------------------------------------------
@@ -277,6 +324,7 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   return {
     initialise,
     applyExpressions,
+    resetAppliedExpressions,
     dispose,
   }
 }

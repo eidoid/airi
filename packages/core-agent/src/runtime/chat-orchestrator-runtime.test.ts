@@ -2,7 +2,7 @@ import type { ChatProvider } from '@xsai-ext/providers/utils'
 import type { Message } from '@xsai/shared-chat'
 
 import type { ChatHistoryItem, ContextMessage, StreamingAssistantMessage } from '../types/chat'
-import type { StreamEvent } from '../types/llm'
+import type { StreamEvent, StreamOptions } from '../types/llm'
 
 import { ContextUpdateStrategy } from '@proj-airi/server-shared/types'
 import { describe, expect, it, vi } from 'vitest'
@@ -41,9 +41,7 @@ function createHarness() {
     assistantResponseRendered: [] as unknown[],
     messageRound: [] as unknown[],
   }
-  const stream = vi.fn(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options?: {
-    onStreamEvent?: (event: StreamEvent) => Promise<void> | void
-  }) => {
+  const stream = vi.fn(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options?: StreamOptions) => {
     await options?.onStreamEvent?.({ type: 'text-delta', text: 'assistant reply' })
     await options?.onStreamEvent?.({ type: 'finish', finishReason: 'stop' })
   })
@@ -280,6 +278,79 @@ describe('createChatOrchestratorRuntime', () => {
       content: 'Plugin toolset guidance.',
     })
     expect(composedMessages[1]).toMatchObject({ role: 'user' })
+  })
+
+  it('generates assistant-initiated turns without persisting a synthetic user message', async () => {
+    const harness = createHarness()
+    let composedMessages: Message[] = []
+    harness.systemPromptSupplement.set('Plugin toolset guidance.')
+    harness.stream.mockImplementationOnce(async (_model, _chatProvider, messages, options) => {
+      composedMessages = messages
+      expect(options?.maxTokens).toBe(64)
+      await options?.onStreamEvent?.({ type: 'text-delta', text: 'proactive reply' })
+      await options?.onStreamEvent?.({ type: 'finish', finishReason: 'stop' })
+    })
+
+    const assistant = await harness.runtime.generateAssistant('speak proactively', {
+      model: 'gpt-test',
+      chatProvider: provider,
+      maxTokens: 64,
+      systemPromptSupplement: 'Return only spoken text.',
+    })
+
+    expect(assistant?.content).toBe('proactive reply')
+    expect(harness.sessionMessages['session-1']).toEqual([
+      expect.objectContaining({ role: 'system', content: 'system prompt' }),
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'proactive reply',
+      }),
+    ])
+    expect(composedMessages[0]).toMatchObject({
+      role: 'system',
+      content: 'system prompt\n\nPlugin toolset guidance.\n\nReturn only spoken text.',
+    })
+    expect(composedMessages[1]).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('speak proactively'),
+    })
+    expect(harness.userAppended).toHaveLength(0)
+    expect(harness.userTurns).toHaveLength(0)
+    expect(harness.assistantAppended).toHaveLength(1)
+  })
+
+  it('can generate assistant-initiated turns without emitting chat hooks', async () => {
+    const harness = createHarness()
+    const hookOrder: string[] = []
+    harness.runtime.hooks.onBeforeMessageComposed(async () => {
+      hookOrder.push('before-compose')
+    })
+    harness.runtime.hooks.onTokenLiteral(async () => {
+      hookOrder.push('token-literal')
+    })
+    harness.runtime.hooks.onAssistantResponseEnd(async () => {
+      hookOrder.push('assistant-end')
+    })
+    harness.stream.mockImplementationOnce(async (_model, _chatProvider, _messages, options) => {
+      await options?.onStreamEvent?.({ type: 'text-delta', text: 'quiet proactive reply' })
+      await options?.onStreamEvent?.({ type: 'finish', finishReason: 'stop' })
+    })
+
+    const assistant = await harness.runtime.generateAssistant('speak proactively', {
+      model: 'gpt-test',
+      chatProvider: provider,
+      emitHooks: false,
+    })
+
+    expect(assistant?.content).toBe('quiet proactive reply')
+    expect(hookOrder).toEqual([])
+    expect(harness.sessionMessages['session-1']).toEqual([
+      expect.objectContaining({ role: 'system', content: 'system prompt' }),
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'quiet proactive reply',
+      }),
+    ])
   })
 
   /**

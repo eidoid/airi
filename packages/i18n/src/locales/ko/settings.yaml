@@ -156,6 +156,8 @@ live2d:
     force-idle-eye-animation:
       title: Idle eye movement
       description: Randomly look around when there is no active cursor focus.
+    idle-eye-delay:
+      title: Idle eye delay (seconds)
     blink-enable:
       title: Enable blink
       description: Let the model blink.
@@ -321,6 +323,7 @@ pages:
     description: AIRI 캐릭터 카드 프리셋 사용
     description_label: 설명
     drop_here: 여기로 끌어서 업로드
+    import_error: 카드를 가져올 수 없음
     create_card: 새로운 카드 만들기
     edit_card: 카드 편집
     creation:

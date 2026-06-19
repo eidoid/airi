@@ -156,6 +156,8 @@ live2d:
     force-idle-eye-animation:
       title: Легкое движение глаз
       description: Случайно смотреть вокруг когда нет активного курсора фокуса.
+    idle-eye-delay:
+      title: Idle eye delay (seconds)
     blink-enable:
       title: Включить моргание
       description: Пусть модель моргает
@@ -321,6 +323,7 @@ pages:
     description: Используйте предустановленные карты персонажей AIRI
     description_label: Описание
     drop_here: Перетащите сюда для загрузки
+    import_error: Не удалось импортировать карту
     create_card: Создать новую карту
     edit_card: Редактировать карточку
     creation:

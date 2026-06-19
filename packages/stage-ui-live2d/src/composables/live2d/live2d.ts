@@ -7,6 +7,7 @@ const live2dModelEyeOffset = useLocalStorageManualReset('settings/live2d/model-e
 const live2dIdleAnimationEnabled = useLocalStorageManualReset<boolean>('settings/live2d/idle-animation-enabled', true)
 /** Let the avatar look around while no cursor tracking source is active. */
 const live2dForceIdleEyeAnimation = useLocalStorageManualReset<boolean>('settings/live2d/idle-eye-animation-enabled', true)
+const live2dIdleEyeAnimationDelayMs = useLocalStorageManualReset<number>('settings/live2d/idle-eye-animation-delay-ms', 5000)
 const live2dAutoBlinkEnabled = useVersionedLocalStorageManualReset<boolean>('settings/live2d/auto-blink-enabled', true, {
   defaultVersion: '2.0.0',
   satisfiesVersionBy(beforeVersion, afterVersion) {
@@ -37,6 +38,7 @@ function resetState() {
   live2dModelEyeOffset.reset()
   live2dIdleAnimationEnabled.reset()
   live2dForceIdleEyeAnimation.reset()
+  live2dIdleEyeAnimationDelayMs.reset()
   live2dAutoBlinkEnabled.reset()
   live2dForceAutoBlinkEnabled.reset()
   live2dExpressionEnabled.reset()
@@ -51,6 +53,7 @@ export const useSettingsLive2d = defineStore('settings-live2d', () => {
     live2dModelEyeOffset,
     live2dIdleAnimationEnabled,
     live2dForceIdleEyeAnimation,
+    live2dIdleEyeAnimationDelayMs,
     live2dAutoBlinkEnabled,
     live2dForceAutoBlinkEnabled,
     live2dExpressionEnabled,

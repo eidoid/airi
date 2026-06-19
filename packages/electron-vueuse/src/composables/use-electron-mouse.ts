@@ -3,12 +3,17 @@ import type { UseMouseOptions } from '@vueuse/core'
 import { defineInvoke } from '@moeru/eventa'
 import { cursorScreenPoint, startLoopGetCursorScreenPoint } from '@proj-airi/electron-eventa'
 import { useMouse } from '@vueuse/core'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 
 import { getElectronEventaContext } from './use-electron-eventa-context'
 
+export type ElectronMouseSource = 'electron' | 'niri' | 'niri-window'
+
 let sharedEventTarget: EventTarget | undefined
 let startedTracking = false
+const sharedSource = shallowRef<ElectronMouseSource>('electron')
+const sharedSourceWidth = shallowRef<number>()
+const sharedSourceHeight = shallowRef<number>()
 
 export function useElectronMouseEventTarget() {
   const context = getElectronEventaContext()
@@ -17,7 +22,16 @@ export function useElectronMouseEventTarget() {
     sharedEventTarget = new EventTarget()
 
     context.on(cursorScreenPoint, (event) => {
-      const e = new MouseEvent('mousemove', { screenX: event.body?.x, screenY: event.body?.y })
+      const body = event.body as ({ source?: ElectronMouseSource, x?: number, y?: number, sourceWidth?: number, sourceHeight?: number } | undefined)
+      sharedSource.value = body?.source ?? 'electron'
+      sharedSourceWidth.value = typeof body?.sourceWidth === 'number' ? body.sourceWidth : undefined
+      sharedSourceHeight.value = typeof body?.sourceHeight === 'number' ? body.sourceHeight : undefined
+      const e = new MouseEvent('mousemove', {
+        screenX: body?.x,
+        screenY: body?.y,
+        clientX: body?.x,
+        clientY: body?.y,
+      })
       sharedEventTarget?.dispatchEvent(e)
     })
   }
@@ -32,5 +46,10 @@ export function useElectronMouseEventTarget() {
 
 export function useElectronMouse(options?: UseMouseOptions) {
   const eventTarget = useElectronMouseEventTarget()
-  return useMouse({ ...options, target: eventTarget, type: 'screen' })
+  return {
+    ...useMouse({ ...options, target: eventTarget, type: 'screen' }),
+    source: sharedSource,
+    sourceWidth: sharedSourceWidth,
+    sourceHeight: sharedSourceHeight,
+  }
 }
