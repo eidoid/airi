@@ -144,6 +144,8 @@ docs/research
 
 # Tools - Obsidian
 .obsidian/
+# Local Codex workspace directory (machine-local agent state)
+.codex
 
 docs/ai/context/verifications/
 .playwright-mcp/
