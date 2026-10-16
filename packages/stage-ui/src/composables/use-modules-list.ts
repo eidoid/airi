@@ -14,6 +14,7 @@ import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
 import { useHomeAssistantStore } from '../stores/modules/home-assistant'
+import { useProactiveSpeechStore } from '../stores/modules/proactive-speech'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useStickersStore } from '../stores/modules/stickers'
 import { useTwitterStore } from '../stores/modules/twitter'
@@ -40,6 +41,7 @@ export function useModulesList() {
   const speechStore = useSpeechStore()
   const stickersStore = useStickersStore()
   const hearingStore = useHearingStore()
+  const proactiveSpeechStore = useProactiveSpeechStore()
   const visionStore = useVisionStore()
   const discordStore = useDiscordStore()
   const twitterStore = useTwitterStore()
@@ -71,6 +73,15 @@ export function useModulesList() {
       icon: 'i-solar:user-speak-rounded-bold-duotone',
       to: '/settings/modules/speech',
       configured: speechStore.configured,
+      category: 'essential',
+    },
+    {
+      id: 'proactive-speech',
+      name: t('settings.pages.modules.proactive-speech.title'),
+      description: t('settings.pages.modules.proactive-speech.description'),
+      icon: 'i-solar:chat-square-call-bold-duotone',
+      to: '/settings/modules/proactive-speech',
+      configured: proactiveSpeechStore.isRunning,
       category: 'essential',
     },
     {
