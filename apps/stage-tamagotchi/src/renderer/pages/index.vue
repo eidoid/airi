@@ -81,7 +81,7 @@ const { isOutside: isOutsideWindow } = useElectronMouseInWindow()
 // read its answer rather than mounting a second set of listeners over the same element.
 const isOutside = computed(() => controlsIslandRef.value?.isOutside ?? true)
 const isOutsideFor250Ms = refDebounced(isOutside, 250)
-const { x: relativeMouseX, y: relativeMouseY } = useElectronRelativeMouse()
+const { x: relativeMouseX, y: relativeMouseY, hasWindowPointer, isPointerInsideWindow } = useElectronRelativeMouse()
 // NOTICE: In real-world use cases of Fade on Hover feature, the cursor may move around the edge of the
 // model rapidly, causing flickering effects when checking pixel transparency strictly.
 // Here we use render-target pixel sampling to keep detection aligned with the actual render output.
@@ -179,14 +179,23 @@ const { isNearAnyBorder: isAroundWindowBorder } = useElectronMouseAroundWindowBo
 const isAroundWindowBorderFor250Ms = refDebounced(isAroundWindowBorder, 250)
 
 // The controls Island hides while the cursor is away from the window. The edge
-// band counts as the window, because a resize holds the cursor there. On
-// Wayland the cursor signal can stick outside (#2521), so the Island stays.
+// band counts as the window, because a resize holds the cursor there.
 const isWayland = ref(true)
-// A failed probe keeps `true`, so the Island stays shown as before this feature.
+// A failed probe keeps `true`, so on Wayland we fall back to the renderer-local
+// pointer state instead of the global cursor signal.
 useElectronEventaInvoke(electronAppIsWayland)()
   .then(value => isWayland.value = value)
-  .catch(error => console.warn('[Main Page] Failed to detect Wayland; the controls Island stays shown:', errorMessageFrom(error)))
-const cursorAwayFromWindow = computed(() => !isWayland.value && isOutsideWindow.value && !isAroundWindowBorder.value)
+  .catch(error => console.warn('[Main Page] Failed to detect Wayland:', errorMessageFrom(error)))
+// On Wayland the global cursor signal can stick outside (#2521), so use the
+// renderer-local pointer state (pointerenter/pointermove/mouseleave) once this
+// window has seen pointer input. Before any pointer input the Island stays.
+const pointerAwayFromWindowByRenderer = computed(() => hasWindowPointer.value && !isPointerInsideWindow.value)
+const cursorAwayFromWindow = computed(() => {
+  // The edge band counts as the window: a resize holds the cursor there.
+  if (isAroundWindowBorder.value)
+    return false
+  return isWayland.value ? pointerAwayFromWindowByRenderer.value : isOutsideWindow.value
+})
 
 const setIgnoreMouseEvents = useElectronEventaInvoke(electron.window.setIgnoreMouseEvents)
 
