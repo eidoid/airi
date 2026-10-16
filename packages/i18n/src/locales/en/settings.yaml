@@ -1100,6 +1100,64 @@ pages:
       token-description: Your Discord bot token
       token-placeholder: Enter your Discord bot token
       configured: Discord is properly configured!
+    proactive-speech:
+      title: Proactive Speech
+      description: >-
+        Let AIRI speak on her own at a randomized interval. AIRI generates the
+        spoken reply through the active consciousness model and routes it to
+        the configured speech synthesis pipeline, then records what she said
+        in the active chat history.
+      sections:
+        section:
+          schedule:
+            title: Schedule
+            description: >-
+              AIRI waits a random duration inside this window between turns.
+              Shorter windows feel more chatty; longer windows feel more
+              ambient.
+            enabled:
+              title: Enable proactive speech
+              description: >-
+                Master switch. AIRI will only speak proactively while this is
+                on.
+            show-stage-timer:
+              title: Show Stage timer
+              description: >-
+                Display the proactive speech countdown in the upper-left corner
+                of AIRI Stage.
+            interval-min:
+              title: Minimum interval
+              description: Lower bound for the random wait, in minutes.
+            interval-max:
+              title: Maximum interval
+              description: Upper bound for the random wait, in minutes.
+          prompt:
+            title: Prompt
+            description: >-
+              The user-role prompt sent to the LLM on every proactive turn.
+              The placeholders `{{cardName}}`, `{{now}}`, and
+              `{{lastTriggeredAt}}` are replaced with live values.
+            template:
+              title: Prompt template
+              description: Free-form template. Supports the placeholders above.
+          runtime:
+            title: Runtime
+            trigger-now: Speak now
+            trigger-now-description: >-
+              Force one proactive turn immediately (uses the configured
+              provider, model, and speech pipeline).
+            last-triggered:
+              never: Never triggered yet.
+              at: 'Last triggered: {timestamp}'
+            last-error:
+              none: No errors.
+              at: 'Last error: {message}'
+            last-skipped:
+              at: 'Last skipped: {reason}'
+            status:
+              running: Running
+              stopped: Stopped
+              thinking: Generating reply…
     speech:
       description: Speech synthesis
       sections:
