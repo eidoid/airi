@@ -38,8 +38,6 @@ import AuthStatusIsland from '../components/stage-islands/auth-status-island.vue
 import ControlsIslandRoot from '../components/stage-islands/controls-island/controls-island-root.vue'
 import ControlsIsland from '../components/stage-islands/controls-island/index.vue'
 import ResourceStatusIsland from '../components/stage-islands/resource-status-island/index.vue'
-import WindowResizeBorder from '../components/window-resize-border.vue'
-
 import { defaultFullscreenSurface, electronAppIsWayland, electronFullscreenExit, electronFullscreenSetMode, electronMainPageMounted, electronMainWindowEnterFullscreen, electronMainWindowGetFullscreenState, electronMainWindowSetFullscreenBounds, electronOpenInlay, electronOpenOnboarding, electronOpenSettings } from '../../shared/eventa'
 import { fullscreenHostPages, fullscreenSurfaceOf } from '../components/fullscreen/surfaces'
 import { useModelSettingsRuntimeOwner } from '../composables/model-settings-runtime-owner'
@@ -812,10 +810,6 @@ const cursorPosition = computed(() => ({
       </div>
     </div>
   </Transition>
-  <WindowResizeBorder
-    :shown="(isAroundWindowBorder || isAroundWindowBorderFor250Ms) && !isLoading && !fullscreenActive"
-    :class="['rounded-2xl']"
-  />
   <!--
     The fullscreen mode of the main window. Nothing of it mounts until it opens. Two layers share the size of the area:
     the backdrop under the stage, and the island and the surface over it. Their content keeps its final layout from
