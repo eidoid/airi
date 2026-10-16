@@ -18,13 +18,19 @@ const emit = defineEmits<{
 const items = defineModel<string[]>({ required: true })
 
 function addItem() {
-  items.value.push('')
+  // Replace the array instead of mutating it in place: parents that pass a
+  // plain array through `v-model` do not observe `push`/`splice`.
+  items.value = [...items.value, '']
   emit('add')
 }
 
 function removeItem(index: number) {
-  items.value.splice(index, 1)
+  items.value = items.value.filter((_, itemIndex) => itemIndex !== index)
   emit('remove', index)
+}
+
+function updateItem(index: number, value: string | undefined) {
+  items.value = items.value.map((item, itemIndex) => itemIndex === index ? value ?? '' : item)
 }
 </script>
 
@@ -47,14 +53,15 @@ function removeItem(index: number) {
 
       <div v-auto-animate :class="['flex flex-col gap-2']">
         <div
-          v-for="(_, index) in items"
+          v-for="(item, index) in items"
           :key="index"
           :class="['flex w-full items-center gap-2']"
         >
           <Input
-            v-model="items[index]"
+            :model-value="item"
             :placeholder="props.valuePlaceholder"
             :class="['flex-1']"
+            @update:model-value="updateItem(index, $event as string | undefined)"
           />
           <button
             type="button"
