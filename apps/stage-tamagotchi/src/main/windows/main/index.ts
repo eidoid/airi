@@ -20,10 +20,8 @@ import type { SpotlightWindowManager } from '../spotlight'
 import type { WidgetsWindowManager } from '../widgets'
 
 import { dirname, join, resolve } from 'node:path'
-import { env } from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-import { is } from '@electron-toolkit/utils'
 import { useLogg } from '@guiiai/logg'
 import { defineInvoke, defineInvokeHandler } from '@moeru/eventa'
 import { createContext } from '@moeru/eventa/adapters/electron/main'
@@ -140,16 +138,6 @@ export async function setupMainWindow(params: {
   onAppBeforeQuit(() => {
     allowClose = true
   })
-
-  // NOTICE: in development mode, open devtools by default
-  if (is.dev || env.MAIN_APP_DEBUG || env.APP_DEBUG) {
-    try {
-      window.webContents.openDevTools({ mode: 'detach' })
-    }
-    catch (err) {
-      console.error('failed to open devtools:', err)
-    }
-  }
 
   /** The bounds before fullscreen mode. While it is set, the window covers its display and the config keeps the old bounds. */
   let boundsBeforeFullscreen: Rectangle | undefined
