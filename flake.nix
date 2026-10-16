@@ -51,6 +51,9 @@
               nixfmt-tree
               airi.pnpm # Use pinned version
               python314
+              gnumake # For native node dependencies built inside the FHS shell
+              gcc
+
               typescript-language-server
               vscode-langservers-extracted # For vscode-eslint-language-server
             ];
