@@ -739,7 +739,7 @@ defineExpose({
     <div
       v-if="showProactiveStageTimer && proactiveSpeechRunning"
       :class="[
-        'pointer-events-none absolute left-3 top-3 z-10',
+        'pointer-events-none absolute right-3 top-3 z-10',
         'flex items-center gap-2',
         'rounded-md px-2 py-1',
         'bg-white/75 text-neutral-700 shadow-sm backdrop-blur',
