@@ -452,9 +452,10 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
       if (!handledByChatRuntime)
         writeToSession(text)
 
-      // Notice replies stay quiet inside the chat runtime, so the store owns
-      // speaking both generated replies and local card greetings aloud.
-      if (canEmitDirectSpeech())
+      // The chat runtime speaks the assistant reply of a notice turn through the
+      // voice host, so only local card greetings are spoken here. Speaking the
+      // generated reply again would say it twice.
+      if (!handledByChatRuntime && canEmitDirectSpeech())
         await characterStore.emitTextOutput(text)
 
       lastTriggeredAt.value = Date.now()

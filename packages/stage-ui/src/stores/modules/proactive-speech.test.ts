@@ -168,7 +168,9 @@ describe('proactive speech store', () => {
       'session-1',
     )
     expect(outcome?.text).toBe('The room is quiet.')
-    expect(deps.emitTextOutput).toHaveBeenCalledWith('The room is quiet.')
+    // The chat runtime speaks the notice reply through the voice host; the
+    // store must not speak it a second time.
+    expect(deps.emitTextOutput).not.toHaveBeenCalled()
 
     // The runtime calls `chatProvider.generation()`, so the store must pass the
     // generation wrapper rather than the raw provider instance.
