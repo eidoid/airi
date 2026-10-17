@@ -53,6 +53,7 @@ export async function setupMainWindowElectronInvokes(params: {
   onboardingWindowManager: OnboardingWindowManager
   ioTraceRecording: IOTraceRecordingService
   inlayWindow: () => Promise<BrowserWindow>
+  inlayEnabled: () => boolean
   globalShortcut: GlobalShortcutService
   /** Owns the main window's pin, which fullscreen mode overrides. */
   setPinned: (pinned: boolean) => void
@@ -83,6 +84,8 @@ export async function setupMainWindowElectronInvokes(params: {
   defineInvokeHandler(context, electronOpenEditor, () => params.editorWindow.openWindow())
   // Speech opens the inlay without focus, so the user can keep working in another app while speaking.
   defineInvokeHandler(context, electronOpenInlay, async () => {
+    if (!params.inlayEnabled())
+      return
     const inlay = await params.inlayWindow()
     if (!inlay.isDestroyed() && !inlay.isVisible())
       inlay.showInactive()

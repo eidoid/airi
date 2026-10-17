@@ -74,6 +74,8 @@ export async function setupMainWindow(params: {
   ioTraceRecording: IOTraceRecordingService
   globalShortcut: GlobalShortcutService
   inlayWindow: () => Promise<BrowserWindow>
+  /** Whether the voice inlay window may be created and shown. */
+  inlayEnabled: () => boolean
   devtoolsWindow: DevtoolsWindowManager
   spotlightWindow: SpotlightWindowManager
   /**
@@ -247,6 +249,7 @@ export async function setupMainWindow(params: {
     onboardingWindowManager: params.onboardingWindowManager,
     ioTraceRecording: params.ioTraceRecording,
     inlayWindow: params.inlayWindow,
+    inlayEnabled: params.inlayEnabled,
     globalShortcut: params.globalShortcut,
     setPinned,
     center: centerWindow,
@@ -259,10 +262,13 @@ export async function setupMainWindow(params: {
 
   // The inlay loads once and stays shown, so the first speech does not wait for a window and a page load.
   // It is transparent and click-through until speech starts. Showing it inactive keeps focus in the main window.
-  void params.inlayWindow().then((inlay) => {
-    if (!inlay.isDestroyed())
-      inlay.showInactive()
-  }).catch(error => console.error('Failed to prepare the inlay window', error))
+  // Disabled by default (`inlayEnabled` in the app config), so no window is created unless asked for.
+  if (params.inlayEnabled()) {
+    void params.inlayWindow().then((inlay) => {
+      if (!inlay.isDestroyed())
+        inlay.showInactive()
+    }).catch(error => console.error('Failed to prepare the inlay window', error))
+  }
 
   /**
    * This is a know issue (or expected behavior maybe) to Electron.
