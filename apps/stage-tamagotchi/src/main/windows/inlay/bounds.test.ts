@@ -9,15 +9,15 @@ import { INLAY_WINDOW_HEIGHT, inlayWindowBounds } from './bounds'
 vi.mock('electron', () => ({ screen: {} }))
 
 describe('inlayWindowBounds', () => {
-  it('centers the inlay and keeps 10% of a laptop work area below it', () => {
+  it('places the inlay flush in the top-right corner of a laptop work area', () => {
     // A 1470x956 display with a 33px menu bar and a 70px Dock.
     const workArea = { x: 0, y: 33, width: 1470, height: 853 }
 
     const bounds = inlayWindowBounds(workArea)
 
     expect(bounds.width).toBe(485)
-    expect(bounds.x).toBe(493)
-    expect(bounds.y + bounds.height).toBe(33 + 853 - 85)
+    expect(bounds.x + bounds.width).toBe(1470)
+    expect(bounds.y).toBe(33)
     expect(bounds.height).toBe(INLAY_WINDOW_HEIGHT)
   })
 
@@ -26,8 +26,8 @@ describe('inlayWindowBounds', () => {
 
     const bounds = inlayWindowBounds(workArea)
 
-    expect(bounds.x).toBe(-2560 + Math.round((2560 - bounds.width) / 2))
-    expect(bounds.y + bounds.height).toBe(-200 + 1415 - 142)
+    expect(bounds.x + bounds.width).toBe(-2560 + 2560)
+    expect(bounds.y).toBe(-200)
   })
 
   it('keeps the inlay narrow on a wide display', () => {
@@ -36,14 +36,14 @@ describe('inlayWindowBounds', () => {
     const bounds = inlayWindowBounds(workArea)
 
     expect(bounds.width).toBe(520)
-    expect(bounds.x).toBe(1020)
+    expect(bounds.x + bounds.width).toBe(2560)
   })
 
-  it('keeps at least 56px below the inlay on a short work area', () => {
+  it('stays inside a short work area', () => {
     const workArea = { x: 0, y: 0, width: 1280, height: 400 }
 
     const bounds = inlayWindowBounds(workArea)
 
-    expect(bounds.y + bounds.height).toBe(400 - 56)
+    expect(bounds.y).toBe(0)
   })
 })
