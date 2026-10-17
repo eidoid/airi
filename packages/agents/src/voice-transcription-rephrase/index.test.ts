@@ -10,6 +10,11 @@ describe('parseRephrasedSegments', () => {
     expect(parseRephrasedSegments('```json\n["Hello."]\n```')).toEqual(['Hello.'])
   })
 
+  it('reads the array after a reasoning block and prose', () => {
+    expect(parseRephrasedSegments('<think>The user said hi, keep it short.</think>["hello there"]')).toEqual(['hello there'])
+    expect(parseRephrasedSegments('Here you go:\n["hello there"]\nDone.')).toEqual(['hello there'])
+  })
+
   it('rejects a reply that is not an array of strings', () => {
     expect(() => parseRephrasedSegments('Hello.')).toThrow()
     expect(() => parseRephrasedSegments('{"text":"Hello."}')).toThrow()
