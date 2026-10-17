@@ -112,17 +112,13 @@ export const useVoiceStore = defineStore('voice', () => {
     onError: event => report(event.error),
   })
   const { rephrase } = useVoiceRephrase()
-  // Both post-processing plugins ask the model for a strict JSON answer. Only
-  // run them on an explicitly configured helper model: falling back to the
-  // chat model made reasoning models time out and return <think> text inside
-  // the voice input path.
   controller.use(
-    createVoiceRephrasePlugin({ enabled: () => hearing.rephraseEnabled && !!hearing.rephraseProvider, rephrase, timeoutMs: VOICE_REPHRASE_TIMEOUT_MS }),
+    createVoiceRephrasePlugin({ enabled: () => hearing.rephraseEnabled, rephrase, timeoutMs: VOICE_REPHRASE_TIMEOUT_MS }),
     { grants: ['transcript-patch'], onError: event => report(event.error) },
   )
   const { judge } = useVoiceEndJudge()
   controller.use(
-    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled && !!hearing.rephraseProvider, judge, pauseMs: VOICE_END_SILENCE.pauseMs }),
+    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled, judge, pauseMs: VOICE_END_SILENCE.pauseMs }),
     { grants: ['input-control'], onError: event => report(event.error) },
   )
 
