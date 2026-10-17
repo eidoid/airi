@@ -23,15 +23,24 @@ const END_JUDGE_INSTRUCTIONS = [
 const judgementSchema = object({ complete: boolean() })
 
 /**
- * Reads the JSON judgement from a model reply. Some models wrap JSON in a Markdown code fence. Any other shape throws.
+ * Reads the JSON judgement from a model reply.
+ *
+ * Reasoning models may prefix the answer with a `<think>…</think>` block or with prose, so the parser strips
+ * thinking blocks, unwraps an optional Markdown code fence and reads the first JSON object it finds.
  *
  * @example
  * parseEndJudgement('```json\n{"complete": false}\n```')
  * // => 'incomplete'
  */
 function parseEndJudgement(reply: string): EndJudgement {
-  const json = reply.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-  return parse(judgementSchema, JSON.parse(json)).complete ? 'complete' : 'incomplete'
+  const withoutThinking = reply.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+  const fenced = withoutThinking.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced ? fenced[1] : withoutThinking).trim()
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start === -1 || end <= start)
+    throw new Error(`Voice end judgement reply did not contain JSON: ${reply.slice(0, 120)}`)
+  return parse(judgementSchema, JSON.parse(candidate.slice(start, end + 1))).complete ? 'complete' : 'incomplete'
 }
 
 /**
