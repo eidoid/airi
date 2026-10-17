@@ -10,7 +10,7 @@ import { shallowRef } from 'vue'
 // chat runtime, the session, the card and the speech pipeline.
 const deps = vi.hoisted(() => ({
   ingest: vi.fn<(text: string, options: unknown, sessionId?: string) => Promise<void>>(async () => undefined),
-  getProviderInstance: vi.fn(async () => ({})),
+  getChatProviderInstance: vi.fn(async () => ({ generation: vi.fn() })),
   emitTextOutput: vi.fn(async () => undefined),
   appendSessionMessage: vi.fn(),
   getSessionMessages: vi.fn<() => unknown[]>(() => []),
@@ -32,7 +32,7 @@ vi.mock('../chat', async () => {
 })
 
 vi.mock('../providers/provider', () => ({
-  useProviderStore: () => ({ getProviderInstance: deps.getProviderInstance }),
+  useProviderStore: () => ({ getChatProviderInstance: deps.getChatProviderInstance }),
 }))
 
 vi.mock('../character', () => ({
@@ -94,7 +94,7 @@ describe('proactive speech store', () => {
     sessionMessages = []
     deps.getSessionMessages.mockImplementation(() => sessionMessages)
     deps.ingest.mockImplementation(async () => undefined)
-    deps.getProviderInstance.mockResolvedValue({})
+    deps.getChatProviderInstance.mockResolvedValue({ generation: vi.fn() })
     deps.activeCard.value = { name: 'ReLU', greetings: ['Hello there!'] }
     deps.speechConfigured.value = true
     deps.refs.activeSessionId!.value = 'session-1'
@@ -169,6 +169,11 @@ describe('proactive speech store', () => {
     )
     expect(outcome?.text).toBe('The room is quiet.')
     expect(deps.emitTextOutput).toHaveBeenCalledWith('The room is quiet.')
+
+    // The runtime calls `chatProvider.generation()`, so the store must pass the
+    // generation wrapper rather than the raw provider instance.
+    const options = deps.ingest.mock.calls[0]![1] as { chatProvider: { generation?: unknown } }
+    expect(typeof options.chatProvider.generation).toBe('function')
   })
 
   it('skips generation without a chat model', async () => {
