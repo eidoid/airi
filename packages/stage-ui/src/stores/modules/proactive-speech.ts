@@ -135,6 +135,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   let greetingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
   let disposed = false
+  let schedulerOwned = false
 
   function clearTimer() {
     if (timeoutHandle !== null) {
@@ -208,6 +209,21 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     isRunning.value = false
     clearTimer()
     clearGreetingTimer()
+  }
+
+  /**
+   * Claims the proactive speech scheduler for this window.
+   *
+   * The settings window instantiates this store too, to show the module state.
+   * Only the stage window schedules triggers, otherwise an open settings window
+   * would run a second set of timers.
+   */
+  function ownScheduler() {
+    if (schedulerOwned)
+      return
+    schedulerOwned = true
+    if (enabled.value && !isRunning.value)
+      start()
   }
 
   /**
@@ -464,6 +480,9 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   watch(
     [enabled, intervalMinMs, intervalMaxMs],
     () => {
+      if (!schedulerOwned)
+        return
+
       if (!enabled.value) {
         stop()
         return
@@ -483,6 +502,8 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   watch(
     [activeSessionId, enabled, activeSessionGeneration, activeSessionHasConversationMessages],
     ([newId, isEnabled, newGeneration, hasConversationMessages], [oldId, _wasEnabled, oldGeneration, hadConversationMessages]) => {
+      if (!schedulerOwned)
+        return
       if (!isEnabled || !newId)
         return
       const isSameSession = newId === oldId
@@ -513,6 +534,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     nextTriggerAt,
     start,
     stop,
+    ownScheduler,
     trigger: runTrigger,
   }
 })
