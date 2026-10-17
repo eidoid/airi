@@ -5,11 +5,10 @@ import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-sto
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useVoiceControlsStore } from '@proj-airi/stage-ui/stores/voice-controls'
 import { useEventListener, useTimeoutFn } from '@vueuse/core'
-import { computed, nextTick, shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { electronInlayReturnHome } from '../../../shared/eventa'
-import { useChatFloatingClickThrough } from '../../composables/use-chat-floating-click-through'
 import { useGlobalEscape } from '../../composables/use-global-escape'
 
 /**
@@ -36,9 +35,6 @@ const controls = useVoiceControlsStore()
 const sessions = useChatSessionStore()
 const cards = useAiriCardStore()
 const returnHome = useElectronEventaInvoke(electronInlayReturnHome)
-// The window stays above other apps, so only what the page paints takes the pointer.
-const { hitTest } = useChatFloatingClickThrough({ pinned: true })
-
 /**
  * Content that Escape dismissed. The inlay keeps it hidden, so a dismissal never comes back by itself.
  * A dismissed input is cancelled on the host. A dismissed draft stays in the chat window, so a draft is keyed by
@@ -84,11 +80,6 @@ watch(view, (next, previous) => {
 })
 
 const shown = computed<InlayView>(() => view.value === 'hidden' && sending.value ? 'sent' : view.value)
-
-// Content that appears or moves under a still cursor changes what the cursor is over.
-// The hit test treats zero opacity as unpainted, and a transition starts or ends at zero opacity.
-// So `after-enter` runs it again once a card is visible, and `after-leave` once the card is gone.
-watch(shown, () => nextTick(() => hitTest()), { flush: 'post' })
 
 // Speech or a draft keeps the inlay where the user dragged it. Only an idle inlay returns home.
 const homeTimer = useTimeoutFn(() => void returnHome(), RETURN_HOME_DELAY_MS, { immediate: false })
@@ -148,7 +139,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
   <!-- The page anchors the inlay to the bottom edge. The space above it is room for the send animation. -->
   <main :class="['h-full w-full flex flex-col items-center justify-end px-4 pb-4', 'bg-transparent text-neutral-900 dark:text-neutral-100']">
     <!-- An explicit duration, because Vue otherwise also waits for the finished send animation on the leaving card. -->
-    <Transition :name="`inlay-${leave}`" :duration="{ enter: 220, leave: leave === 'dismiss' ? 220 : 160 }" @after-enter="hitTest()" @after-leave="hitTest({ removed: true })">
+    <Transition :name="`inlay-${leave}`" :duration="{ enter: 220, leave: leave === 'dismiss' ? 220 : 160 }">
       <div
         v-if="shown !== 'hidden'"
         data-testid="voice-inlay"

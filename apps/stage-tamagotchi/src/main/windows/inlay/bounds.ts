@@ -14,8 +14,7 @@ const INLAY_WINDOW_MAX_WIDTH = 520
 /**
  * Computes where a new inlay window opens.
  *
- * The inlay is centered horizontally and sits low in the work area, near where a dictation bubble is expected.
- * Its bottom edge keeps 10% of the work-area height free, and at least 56px, so it stays clear of the Dock or taskbar edge.
+ * The inlay sits flush in the top-right corner of the work area, out of the way of the stage and the chat.
  * This is the home position. The user can drag the window away, and it returns here after the inlay is idle.
  *
  * Expects:
@@ -33,12 +32,11 @@ export function inlayWindowBounds(workArea: Rectangle): Rectangle {
     { breakpoints: resolutionBreakpoints },
   )
   const width = Math.min(breakpointWidth, INLAY_WINDOW_MAX_WIDTH)
-  const bottomGap = Math.max(56, Math.round(workArea.height * 0.1))
 
   return {
     width,
     height: INLAY_WINDOW_HEIGHT,
-    x: workArea.x + Math.round((workArea.width - width) / 2),
-    y: Math.max(workArea.y, workArea.y + workArea.height - bottomGap - INLAY_WINDOW_HEIGHT),
+    x: workArea.x + workArea.width - width,
+    y: workArea.y,
   }
 }
