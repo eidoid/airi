@@ -10,6 +10,10 @@ describe('parseEndJudgement', () => {
     expect(parseEndJudgement('```json\n{"complete": false}\n```')).toBe('incomplete')
   })
 
+  it('reads the judgement after a reasoning block and prose', () => {
+    expect(parseEndJudgement('<think>The speaker finished.</think>\nThe answer is {"complete": true}.')).toBe('complete')
+  })
+
   it('rejects a reply that is not the judgement JSON', () => {
     expect(() => parseEndJudgement('complete')).toThrow()
     expect(() => parseEndJudgement('{"complete": "yes"}')).toThrow()

@@ -1,11 +1,20 @@
 /**
- * Reads the JSON value of a model reply. Some models wrap JSON in a Markdown code fence, so the fence is removed first.
- * A reply that is not JSON throws.
+ * Reads the JSON value of a model reply.
+ *
+ * Reasoning models can prefix the answer with a `<think>` block or prose. This function removes thinking blocks,
+ * unwraps an optional Markdown code fence, and reads the first JSON object. A reply without JSON throws.
  *
  * @example
  * readJsonReply('```json\n{"complete": true}\n```')
  * // => { complete: true }
  */
 export function readJsonReply(reply: string): unknown {
-  return JSON.parse(reply.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
+  const withoutThinking = reply.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+  const fenced = withoutThinking.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced?.[1] ?? withoutThinking).trim()
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start === -1 || end <= start)
+    throw new Error(`Model reply did not contain JSON: ${reply.slice(0, 120)}`)
+  return JSON.parse(candidate.slice(start, end + 1))
 }
