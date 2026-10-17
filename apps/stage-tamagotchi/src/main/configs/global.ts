@@ -30,6 +30,8 @@ const updateChannelSchema = pipe(
 
 export const globalAppConfigSchema = object({
   hideAppIcon: optional(boolean()),
+  /** Shows the voice inlay window. Disabled by default; set true in app/options.json. */
+  inlayEnabled: optional(boolean()),
   language: optional(string()),
   spotlightShortcutAccelerator: optional(shortcutAcceleratorSchema),
   updateChannel: optional(updateChannelSchema),
