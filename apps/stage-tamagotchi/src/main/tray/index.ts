@@ -21,7 +21,7 @@ import { isMacOS } from 'std-env'
 import icon from '../../../resources/icon.png?asset'
 import macOSTrayIcon from '../../../resources/tray-icon-macos.png?asset'
 
-import { electronAppIconGet, electronAppIconSet } from '../../shared/eventa'
+import { electronAppIconGet, electronAppIconSet, electronInlayEnabledGet, electronInlayEnabledSet } from '../../shared/eventa'
 import { findDominantDisplayArea } from '../../shared/utils/electron/display'
 import { onAppBeforeQuit } from '../libs/bootkit/lifecycle'
 import { shouldOpenDevTools } from '../libs/electron/devtools'
@@ -273,6 +273,11 @@ const setupTrayOnce = once((params: SetupTrayParams): void => {
   defineInvokeHandler(context, electronAppIconSet, async (payload) => {
     await appIcon.setHidden(Boolean(payload))
     return appIcon.hidden
+  })
+  defineInvokeHandler(context, electronInlayEnabledGet, () => Boolean(params.appConfig.get()?.inlayEnabled))
+  defineInvokeHandler(context, electronInlayEnabledSet, (payload) => {
+    params.appConfig.update({ ...params.appConfig.get(), inlayEnabled: Boolean(payload) })
+    return Boolean(payload)
   })
 
   onAppBeforeQuit(() => {

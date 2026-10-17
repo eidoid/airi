@@ -4,7 +4,7 @@ import { useElectronEventaContext, useElectronEventaInvoke, useElectronMouseInEl
 import { IS_DEV } from '@proj-airi/stage-shared'
 import { HearingConfigDialog, InboxPanel } from '@proj-airi/stage-ui/components'
 import { useInboxStore } from '@proj-airi/stage-ui/stores/inbox'
-import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
+import { useSettings, useSettingsAudioDevice, useSettingsControlsIsland } from '@proj-airi/stage-ui/stores/settings'
 import { Badge, IconButton, ScrollableArea, useTheme } from '@proj-airi/ui'
 import { refDebounced, useFocusWithin, useIntervalFn, useMouseInElement, useMousePressed, useNow } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
@@ -196,11 +196,14 @@ const { isOutside: isOutsideByCursor } = useElectronMouseInElement(islandElement
 const { isOutside: isOutsideByDom } = useMouseInElement(islandElement)
 const isOutside = computed(() => isOutsideByCursor.value && isOutsideByDom.value)
 const isOutsideAfter2seconds = refDebounced(isOutside, 1500)
+// The renderer-local signal is the reliable one on Wayland, where the global cursor can stick.
+const isOutsideByDomAfterDelay = refDebounced(isOutsideByDom, 1500)
 
 // A user who works in the menu, in a dialog, or with the keyboard keeps the
 // Island after the cursor leaves the window.
 const { focused: islandFocused } = useFocusWithin(islandElement)
-const concealed = computed(() => props.cursorAway && !expanded.value && !isBlocked.value && !islandFocused.value)
+const { autoHide } = storeToRefs(useSettingsControlsIsland())
+const concealed = computed(() => autoHide.value && isOutsideByDomAfterDelay.value && !expanded.value && !isBlocked.value && !islandFocused.value)
 
 // The stage page observes this element for cursor hit testing.
 defineExpose({

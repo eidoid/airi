@@ -670,6 +670,9 @@ export const electronAppIsWayland = defineInvokeEventa<boolean>('eventa:invoke:e
 export const electronMainPageMounted = defineInvokeEventa<void>('eventa:invoke:electron:main-window:page-mounted')
 export const electronAppIconGet = defineInvokeEventa<boolean>('eventa:invoke:electron:app-icon:get')
 export const electronAppIconSet = defineInvokeEventa<boolean, boolean>('eventa:invoke:electron:app-icon:set')
+/** Whether the voice inlay window may be created and shown. */
+export const electronInlayEnabledGet = defineInvokeEventa<boolean>('eventa:invoke:electron:inlay:enabled:get')
+export const electronInlayEnabledSet = defineInvokeEventa<boolean, boolean>('eventa:invoke:electron:inlay:enabled:set')
 
 export type ElectronGodotStageState = 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
 
