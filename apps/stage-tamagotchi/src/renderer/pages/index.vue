@@ -38,6 +38,7 @@ import AuthStatusIsland from '../components/stage-islands/auth-status-island.vue
 import ControlsIslandRoot from '../components/stage-islands/controls-island/controls-island-root.vue'
 import ControlsIsland from '../components/stage-islands/controls-island/index.vue'
 import ResourceStatusIsland from '../components/stage-islands/resource-status-island/index.vue'
+import { useProactiveSpeechStore } from '@proj-airi/stage-ui/stores/modules/proactive-speech'
 import { defaultFullscreenSurface, electronAppIsWayland, electronFullscreenExit, electronFullscreenSetMode, electronMainPageMounted, electronMainWindowEnterFullscreen, electronMainWindowGetFullscreenState, electronMainWindowSetFullscreenBounds, electronOpenInlay, electronOpenOnboarding, electronOpenSettings } from '../../shared/eventa'
 import { fullscreenHostPages, fullscreenSurfaceOf } from '../components/fullscreen/surfaces'
 import { useModelSettingsRuntimeOwner } from '../composables/model-settings-runtime-owner'
@@ -659,6 +660,9 @@ const voice = useVoiceStore()
 const toolSelection = useToolSelectionStore()
 // Spoken turns start in this window. They use the tools that the chat window composer grants.
 onScopeDispose(voice.connectTools(() => toolSelection.requestTools))
+// The stage window owns the proactive speech scheduler; other windows read its state.
+useProactiveSpeechStore().ownScheduler()
+
 const openInlay = useElectronEventaInvoke(electronOpenInlay)
 useVoiceListening()
 usePushToTalkShortcut()
