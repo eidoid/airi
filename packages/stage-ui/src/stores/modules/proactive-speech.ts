@@ -5,8 +5,6 @@ import { computed, onScopeDispose, shallowRef, watch } from 'vue'
 
 import { extractMessageText } from '../../libs/chat-sync'
 import { useCharacterStore } from '../character'
-import type { ChatOrchestratorSendOptions } from '@proj-airi/core-agent'
-
 import { useChatStore } from '../chat'
 import { useChatSessionStore } from '../chat/session-store'
 import { useProviderStore } from '../providers/provider'
@@ -337,9 +335,10 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   }
 
   async function generateReply(): Promise<string | undefined> {
-    const providerInstance = await providerStore.getProviderInstance(activeChatProviderId.value)
-    if (!providerInstance)
-      throw new Error(`Chat provider "${activeChatProviderId.value}" is unavailable.`)
+    // The chat runtime calls `chatProvider.generation()`, which is what the
+    // provider store's generation wrapper exposes; the raw provider instance
+    // does not have that method.
+    const chatProvider = await providerStore.getChatProviderInstance(activeChatProviderId.value)
 
     const sessionId = activeSessionId.value
     if (!sessionId)
@@ -358,7 +357,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     // either as user speech, and the run stays quiet for us to speak aloud.
     await chatStore.ingest(userPrompt, {
       model: activeChatModel.value,
-      chatProvider: providerInstance as ChatOrchestratorSendOptions['chatProvider'],
+      chatProvider,
       systemPromptSupplement: PROACTIVE_SPOKEN_OUTPUT_INSTRUCTION,
       notice: { source: 'proactive-speech' },
     }, sessionId)
