@@ -6,11 +6,19 @@ const rephrasedSegmentsSchema = array(string())
 
 /**
  * Reads the JSON array of rewritten segments from a model reply.
- * Some models wrap JSON in a Markdown code fence. Any other shape throws.
+ *
+ * Reasoning models may prefix the answer with a `<think>…</think>` block or with prose, so the parser strips
+ * thinking blocks, unwraps an optional Markdown code fence and reads the first JSON array it finds.
  */
 export function parseRephrasedSegments(reply: string): string[] {
-  const json = reply.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-  return parse(rephrasedSegmentsSchema, JSON.parse(json))
+  const withoutThinking = reply.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+  const fenced = withoutThinking.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced ? fenced[1] : withoutThinking).trim()
+  const start = candidate.indexOf('[')
+  const end = candidate.lastIndexOf(']')
+  if (start === -1 || end <= start)
+    throw new Error(`Voice rephrase reply did not contain a JSON array: ${reply.slice(0, 120)}`)
+  return parse(rephrasedSegmentsSchema, JSON.parse(candidate.slice(start, end + 1)))
 }
 
 export interface VoiceRephraseOptions {
@@ -51,7 +59,15 @@ export function createVoiceRephrasePlugin(options: VoiceRephraseOptions): VoiceP
           if (!segments.length || segments.some(segment => !segment.final) || !text.trim())
             return
 
-          const rewritten = await options.rephrase(segments.map(segment => segment.text), ctx.signal)
+          let rewritten: readonly string[]
+          try {
+            rewritten = await options.rephrase(segments.map(segment => segment.text), ctx.signal)
+          }
+          catch (error) {
+            // Rephrasing is optional: a slow or reasoning model must not fail the transcription.
+            console.warn('[voice-rephrase] rephrase failed, keeping the provider transcript', error)
+            return
+          }
           // A merged or split answer cannot keep segment boundaries, so the provider text stays.
           if (rewritten.length !== segments.length)
             return

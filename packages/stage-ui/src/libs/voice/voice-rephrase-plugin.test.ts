@@ -7,6 +7,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createVoiceRephrasePlugin, parseRephrasedSegments } from './voice-rephrase-plugin'
 
+describe('parseRephrasedSegments', () => {
+  it('reads the array after a reasoning block and a code fence', () => {
+    expect(parseRephrasedSegments('```json\n["hello there"]\n```')).toEqual(['hello there'])
+    expect(parseRephrasedSegments('<think>The user said hi, keep it short.</think>["hello there"]')).toEqual(['hello there'])
+    expect(parseRephrasedSegments('Here you go:\n["hello there"]\nDone.')).toEqual(['hello there'])
+  })
+})
+
 function createHarness(rephrase: (segments: readonly string[], signal: AbortSignal) => Promise<readonly string[]>, enabled = true) {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream })
