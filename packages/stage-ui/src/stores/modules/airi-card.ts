@@ -137,7 +137,10 @@ export const useAiriCardStore = defineStore('airi-card', () => {
   // Character configuration is durable. Runtime selection is replicated by
   // Pinia and starts from the built-in Character for each application run.
   const cards = useLocalStorageManualReset<Map<string, AiriCard>>('airi-cards', new Map(), { listenToStorageChanges: false })
-  const activeCardId = shallowRef('default')
+  // Durable selection: the card map already persists in localStorage, but the
+  // selected id used to be runtime-only, so every launch fell back to the
+  // built-in 'default' card even though the user's cards were still stored.
+  const activeCardId = useLocalStorageManualReset<string>('airi-card-active-id', 'default', { listenToStorageChanges: false })
   // The active Avatar Model is runtime state. Pinia replicates it between
   // windows, but the Character configuration remains its only durable owner.
   const selectedAvatarModelId = shallowRef<string>()
