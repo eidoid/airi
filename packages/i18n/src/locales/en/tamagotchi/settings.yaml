@@ -33,6 +33,14 @@ pages:
         description: Keep AIRI in the tray only. Use the tray menu to open windows or quit. Changes apply immediately.
         load-error: Failed to load the app icon setting.
         save-error: Failed to update the app icon setting.
+      inlay:
+        title: Voice inlay
+        description: Allow the voice input inlay window to be created and shown. When off, the window is never created.
+        load-error: Could not read the voice inlay setting.
+        save-error: Could not save the voice inlay setting.
+      controls-island-auto-hide:
+        title: Hide the menu when the pointer leaves
+        description: Hide the controls island about 1.5 seconds after the pointer leaves it.
     sections:
       section:
         window-shortcuts:

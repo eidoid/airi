@@ -33,6 +33,14 @@ pages:
         description: 仅保留托盘图标，通过托盘菜单打开窗口或退出应用。修改立即生效。
         load-error: 无法加载应用图标设置。
         save-error: 无法更新应用图标设置。
+      inlay:
+        title: 语音浮层（Inlay）
+        description: 允许创建并显示语音输入浮层窗口。关闭时窗口不会被创建。
+        load-error: 读取语音浮层设置失败。
+        save-error: 保存语音浮层设置失败。
+      controls-island-auto-hide:
+        title: 指针离开后自动隐藏菜单
+        description: 指针离开控制岛约 1.5 秒后自动隐藏。
     sections:
       section:
         window-shortcuts:
