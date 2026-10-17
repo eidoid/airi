@@ -7,7 +7,7 @@ import { useSettings, useSettingsAudioDevice, useSettingsControlsIsland } from '
 import { ScrollableArea, useTheme } from '@proj-airi/ui'
 import { refDebounced, useFocusWithin, useIntervalFn, useMouseInElement, useMousePressed } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { computed, reactive, ref, useId, useTemplateRef, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, useId, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import StatusIsland from '../status-island/index.vue'
@@ -171,8 +171,28 @@ const { isOutside: isOutsideByCursor } = useElectronMouseInElement(islandElement
 const { isOutside: isOutsideByDom } = useMouseInElement(islandElement)
 const isOutside = computed(() => isOutsideByCursor.value && isOutsideByDom.value)
 const isOutsideAfter2seconds = refDebounced(isOutside, 1500)
-// The renderer-local signal is the reliable one on Wayland, where the global cursor can stick.
-const isOutsideByDomAfterDelay = refDebounced(isOutsideByDom, 1500)
+// The renderer-local signal is the reliable one on Wayland. Hiding waits so a
+// quick pass over the Island does not hide it; showing is immediate.
+const isOutsideByDomAfterDelay = ref(false)
+let hideDelayHandle: ReturnType<typeof setTimeout> | undefined
+watch(isOutsideByDom, (outside) => {
+  if (hideDelayHandle !== undefined) {
+    clearTimeout(hideDelayHandle)
+    hideDelayHandle = undefined
+  }
+  if (!outside) {
+    isOutsideByDomAfterDelay.value = false
+    return
+  }
+  hideDelayHandle = setTimeout(() => {
+    hideDelayHandle = undefined
+    isOutsideByDomAfterDelay.value = true
+  }, 1500)
+}, { immediate: true })
+onScopeDispose(() => {
+  if (hideDelayHandle !== undefined)
+    clearTimeout(hideDelayHandle)
+})
 
 // A user who works in the menu, in a dialog, or with the keyboard keeps the
 // Island after the cursor leaves the window.

@@ -26,7 +26,7 @@ import { useBroadcastChannel, useEventListener } from '@vueuse/core'
 // import embedWorkerURL from '@xsai-transformers/embed/worker?worker&url'
 // import { embed } from '@xsai/embed'
 import { storeToRefs } from 'pinia'
-import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
 import StageAvatarModelMissing from './stage-avatar-model-missing.vue'
 import StageRenderError from './stage-render-error.vue'
@@ -42,12 +42,48 @@ import { useChatStore } from '../../stores/chat'
 import { useChatSessionStore } from '../../stores/chat/session-store'
 import { useSharedLive2DExpressionPreview } from '../../stores/live2d'
 import { useAiriCardStore } from '../../stores/modules/airi-card'
+import { useProactiveSpeechStore } from '../../stores/modules/proactive-speech'
+import { useSettingsProactiveSpeech } from '../../stores/settings/proactive-speech'
 import { useSpeechStore } from '../../stores/modules/speech'
 import { useSettingsPresenceBubble } from '../../stores/presence-bubble'
 import { useSettings } from '../../stores/settings'
 import { useSettingsStageModel } from '../../stores/settings/stage-model'
 import { useSpeechOutputControlStore } from '../../stores/speech-output-control'
 import { useVoiceStore } from '../../stores/voice'
+
+const proactiveSpeechStore = useProactiveSpeechStore()
+const {
+  isRunning: proactiveSpeechRunning,
+  isThinking: proactiveSpeechThinking,
+  nextTriggerAt: proactiveSpeechNextTriggerAt,
+} = storeToRefs(proactiveSpeechStore)
+const { showStageTimer: showProactiveStageTimer } = storeToRefs(useSettingsProactiveSpeech())
+const proactiveTimerNow = shallowRef(Date.now())
+let proactiveTimerIntervalHandle: ReturnType<typeof setInterval> | undefined
+const proactiveStageTimerLabel = computed(() => {
+  if (proactiveSpeechThinking.value)
+    return 'Generating'
+
+  const nextTriggerAt = proactiveSpeechNextTriggerAt.value
+  if (nextTriggerAt === null)
+    return 'Waiting'
+
+  const remainingSeconds = Math.max(0, Math.ceil((nextTriggerAt - proactiveTimerNow.value) / 1000))
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+})
+onMounted(() => {
+  proactiveTimerIntervalHandle = setInterval(() => {
+    proactiveTimerNow.value = Date.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  if (proactiveTimerIntervalHandle !== undefined) {
+    clearInterval(proactiveTimerIntervalHandle)
+    proactiveTimerIntervalHandle = undefined
+  }
+})
 
 const props = withDefaults(defineProps<{
   cursorPosition?: { x: number, y: number }
@@ -700,6 +736,18 @@ defineExpose({
 
 <template>
   <div relative h-full w-full>
+    <div
+      v-if="showProactiveStageTimer && proactiveSpeechRunning"
+      :class="[
+        'pointer-events-none absolute left-3 top-3 z-10',
+        'flex items-center gap-2',
+        'rounded-md px-2 py-1',
+        'bg-white/75 text-neutral-700 shadow-sm backdrop-blur',
+        'dark:bg-black/50 dark:text-neutral-100',
+      ]"
+    >
+      <span>Proactive {{ proactiveStageTimerLabel }}</span>
+    </div>
     <div relative h-full w-full>
       <Live2DScene
         v-if="stageModelRenderer === 'live2d' && showStage"
