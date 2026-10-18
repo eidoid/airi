@@ -29,6 +29,15 @@ const wakeIssue = computed(() => {
     return t('stage.status.wake-word-unconfigured')
   return undefined
 })
+/** Without a reason, a wake word mode that matches nothing looks the same as a working one. */
+const wakeSummary = computed(() => {
+  if (inputMode.value !== 'wake-word')
+    return undefined
+  const wake = snapshot.value.wakeWords
+  return t('stage.status.wake-word-summary', { state: wake?.preparation ?? 'unknown', matches: wake?.matches ?? 0 })
+})
+/** The model load runs once per listening session. Until it ends, no wake can match. */
+const preparingWake = computed(() => inputMode.value === 'wake-word' && snapshot.value.wakeWords?.preparation === 'preparing')
 const transcript = computed(() => snapshot.value.input?.text)
 const isTranscribing = computed(() => snapshot.value.input?.phase === 'finalizing')
 const { volumeLevel } = useAudioAnalyzer()
@@ -47,6 +56,8 @@ const issue = computed(() => {
 const state = computed(() => {
   if (issue.value)
     return 'error'
+  if (preparingWake.value)
+    return 'busy'
   if (isTranscribing.value || (enabled.value && !ready.value))
     return 'busy'
   if (enabled.value)
@@ -57,6 +68,8 @@ const amplitude = computed(() => state.value === 'listening' && ready.value ? Ma
 const label = computed(() => {
   if (issue.value)
     return t('stage.status.hearing-error')
+  if (preparingWake.value)
+    return t('stage.status.wake-word-preparing')
   if (isTranscribing.value)
     return t('stage.status.transcribing')
   if (enabled.value && !ready.value)
@@ -72,7 +85,7 @@ const label = computed(() => {
     :data-status="state"
     :tone="issue ? 'error' : 'neutral'"
     :label="label"
-    :details="issue || transcript || t('stage.status.no-transcript')"
+    :details="issue || transcript || wakeSummary || t('stage.status.no-transcript')"
   >
     <template #indicator>
       <LevelBars :level="amplitude" :busy="state === 'busy'" />
