@@ -172,6 +172,7 @@ export class WakeWordDetector {
         return
       }
 
+      console.info('[wake-word] preparing spotter', keywords.length, 'keywords, generation', this.generation, 'of', generation)
       this.options.onPreparationChange?.('preparing')
       try {
         if (this.spotter) {
@@ -187,6 +188,7 @@ export class WakeWordDetector {
         }
       }
       catch (error) {
+        console.info('[wake-word] preparation failed', errorMessageFrom(error) ?? 'unknown', 'generation', this.generation, 'of', generation)
         if (generation === this.generation)
           this.options.onPreparationChange?.('error', errorMessageFrom(error) ?? 'Wake word model failed to prepare')
         throw error
@@ -197,7 +199,9 @@ export class WakeWordDetector {
       this.resetStream = false
       if (generation !== this.generation)
         return
+      }
       this.keywordsReady = true
+      console.info('[wake-word] ready')
       this.options.onPreparationChange?.('ready')
     })
     this.updates = update.catch(() => {})
