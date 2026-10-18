@@ -16,6 +16,12 @@ export interface VoiceActivityOptions {
   readonly enabled?: () => boolean
   readonly onInput?: () => void
   /**
+   * Receives the reason when a wake word is consumed without starting an input.
+   *
+   * A wake is the only signal in a wake word mode, so a silent drop leaves the user with no feedback at all.
+   */
+  readonly onWakeDropped?: (reason: string) => void
+  /**
    * Runs right before the plugin begins an input, with the reason. The controller announces the input
    * synchronously inside that call, so the host knows the cause of the input that it is told about next.
    * A wake that does not lead to a begin, for example after echo rejection, never reaches this callback.
@@ -67,8 +73,11 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       let input = ctx.controls.activeInput()
 
       // A manual control owns its interval until release. VAD continues inference without ending that input.
-      if (input && input.id !== inputId)
+      if (input && input.id !== inputId) {
+        if (wake)
+          options.onWakeDropped?.('Another input is already active')
         return
+      }
 
       if (options.enabled && !options.enabled()) {
         input?.cancel('Automatic speech input is paused')
@@ -78,20 +87,29 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
 
       const speech = score >= (input ? (options.threshold ?? 0.6) * 0.3 : options.threshold ?? 0.6)
       if ((wake && wake.sessionId !== input?.sessionId) || (!input && speech)) {
-        if (options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal))
+        if (options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal)) {
+          if (wake)
+            options.onWakeDropped?.('AIRI is speaking')
           return
+        }
 
         ctx.signal.throwIfAborted()
         const target = wake ?? options.target()
-        if (!target)
+        if (!target) {
+          if (wake)
+            options.onWakeDropped?.('No character session is available')
           return
+        }
 
         options.beforeBeginInput?.(wake ? 'wake-word' : 'speech')
         const result = ctx.controls.beginInput({ ...target, start: wake
           ? { kind: 'after-silence' }
           : { kind: 'speech-onset', at: { sourceId: ctx.window.range.sourceId, frame: ctx.window.range.startFrame }, preRollMs: options.preRollMs ?? 360 } })
-        if (result.status !== 'started')
+        if (result.status !== 'started') {
+          if (wake)
+            options.onWakeDropped?.(`The input did not start: ${result.status}`)
           return
+        }
 
         input = result.input
         inputId = input.id

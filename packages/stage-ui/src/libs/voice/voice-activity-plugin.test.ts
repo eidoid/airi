@@ -8,6 +8,29 @@ import { expect, it, vi } from 'vitest'
 import { listensContinuously, startsInputOnSpeech } from '../../stores/modules/hearing'
 import { createVoiceActivityPlugin } from './voice-activity-plugin'
 
+it('reports a wake word that starts no input because the assistant speaks', async () => {
+  const source = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })
+  const onWakeDropped = vi.fn()
+  const controller = new VoiceController({ audio, submit: vi.fn(), transcriber: vi.fn() })
+  controller.use(createVoiceActivityPlugin({
+    detect: async () => 0,
+    target: () => ({ sessionId: 'alice', interruptTurns: [] }),
+    detectWakeWord: async () => ({ sessionId: 'alice', interruptTurns: [] }),
+    acceptSpeech: async () => false,
+    onWakeDropped,
+    minSpeechMs: 32,
+    silenceMs: 64,
+  }), { grants: ['input-control', 'cancel-input'] })
+  await Promise.resolve()
+  source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 32 }, sampleRate: 1000, channels: [new Float32Array(32)] })
+
+  // Without a report, a wake in a wake word mode leaves the user with no feedback at all.
+  await vi.waitFor(() => expect(onWakeDropped).toHaveBeenCalledWith('AIRI is speaking'))
+  expect(controller.activeInput).toBeUndefined()
+  await controller.close()
+})
+
 it('uses ordered VAD signals to capture, stream transcription, and submit to the accepted session', async () => {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })

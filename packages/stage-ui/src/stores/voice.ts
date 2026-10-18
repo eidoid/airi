@@ -174,7 +174,7 @@ export const useVoiceStore = defineStore('voice', () => {
     getSpeechBusContext().emit(voiceSnapshotChanged, snapshot)
   }
 
-  watch([state, transcript, frontDraftId, error, microphoneStream, microphoneEnabled, microphoneError, () => wakeWordDetection.preparation, () => wakeWordDetection.error], publishSnapshot)
+  watch([state, transcript, frontDraftId, error, microphoneStream, microphoneEnabled, microphoneError, () => wakeWordDetection.preparation, () => wakeWordDetection.error, wakeMatches], publishSnapshot)
   watch(drafts, publishSnapshot, { deep: true })
 
   function beginInput(options: BeginSpeechInput) {
@@ -523,6 +523,8 @@ export const useVoiceStore = defineStore('voice', () => {
         beginCause = cause
       },
       detectWakeWord: options.detectWakeWord ?? wakeWords?.detect,
+      // A wake is the only input signal in a wake word mode, so a wake that starts nothing must say why.
+      onWakeDropped: reason => report(new Error(`Wake word ignored: ${reason}`)),
       // A capture lease, for example a voiceprint enrollment, records speech that can contain a wake word. It must not start an input.
       enabled: () => !voiceMessages.isRecording && !captureLease.held,
       silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_SILENCE.pauseMs + VOICE_END_SILENCE.graceMs : VOICE_END_SILENCE.pauseMs,
