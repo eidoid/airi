@@ -101,6 +101,43 @@ it('uses ordered VAD signals to capture, stream transcription, and submit to the
   await controller.close()
 })
 
+it('ends an input that never sees silence and keeps its words', async () => {
+  const frames = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => frames.stream }, { historyMs: 360 })
+  const submit = vi.fn(async () => ({ status: 'committed' as const, messageId: 'long-message' }))
+  const controller = new VoiceController({ audio, submit, transcriber: () => ({ transcribe: request => new ReadableStream<TranscriptionEvent>({ async start(output) {
+    await request.audio.pipeTo(new WritableStream())
+    output.enqueue({ type: 'update', revision: 1, segments: [{ id: 'text', revision: 1, text: 'Hello', final: true, tokens: [] }] })
+    output.enqueue({ type: 'complete', revision: 1 })
+    output.close()
+  } }) }) })
+  controller.use(createVoiceActivityPlugin({
+    // A noise floor above the lowered threshold keeps every window speech, so silence never ends this input.
+    detect: async () => 1,
+    target: () => ({ sessionId: 'alice', interruptTurns: [] }),
+    minSpeechMs: 32,
+    maxInputMs: 128,
+    silenceMs: 64,
+  }), { grants: ['input-control', 'cancel-input'] })
+  await Promise.resolve()
+  let frame = 0
+  async function push(count = 1) {
+    for (let index = 0; index < count; index++) {
+      frames.write({ range: { sourceId: 'mic', startFrame: frame, endFrame: frame + 32 }, sampleRate: 1000, channels: [new Float32Array(32).fill(1)] })
+      frame += 32
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+  }
+
+  await push(8)
+  await expect.poll(() => controller.activeInput?.state.phase, { timeout: 3000 }).toBe('capturing')
+  await push(10)
+
+  // The input ends at its limit instead of blocking every later input of the session.
+  await vi.waitFor(() => expect(submit).toHaveBeenCalled(), { timeout: 3000 })
+  await controller.close()
+})
+
 it('rejects playback echo and opens the matched character input only after playback fades', async () => {
   const frames = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => frames.stream })

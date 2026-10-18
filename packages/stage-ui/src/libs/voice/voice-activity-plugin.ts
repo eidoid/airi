@@ -49,6 +49,15 @@ export interface VoiceActivityOptions {
    * @default 1200
    */
   readonly silenceMs?: number | (() => number)
+  /**
+   * The longest audio that one input keeps open, in milliseconds of captured speech windows.
+   *
+   * A microphone with a noise floor above the lowered threshold never reports silence, so its input would stay open
+   * for good and every later wake for that session would be ignored. The input ends and keeps its words.
+   *
+   * @default 30000
+   */
+  readonly maxInputMs?: number
   /** @default 360. Speech onset retains this much audio before the detected window. */
   readonly preRollMs?: number
 }
@@ -59,6 +68,8 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
     let inputId: string | undefined
     let speechMs = 0
     let silenceMs = 0
+    /** The captured duration of the input that this plugin owns. It bounds an input that never sees silence. */
+    let capturedMs = 0
 
     // NOTICE:
     // SileroVad requires 512 samples at 16 kHz, so each window lasts 32 ms.
@@ -100,6 +111,18 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
         options.onWakeDropped?.('An input is already open for this session')
 
       const speech = score >= (input ? (options.threshold ?? 0.6) * 0.3 : options.threshold ?? 0.6)
+      if (input && input.id === inputId) {
+        capturedMs += duration
+        if (capturedMs >= (options.maxInputMs ?? 30_000)) {
+          // The words stay. An input that never ends would block every later input of its session.
+          void input.end()
+          inputId = undefined
+          capturedMs = 0
+          speechMs = 0
+          silenceMs = 0
+          return
+        }
+      }
       if ((wake && wake.sessionId !== input?.sessionId) || (!input && speech)) {
         if (options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal)) {
           if (wake)
@@ -127,6 +150,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
 
         input = result.input
         inputId = input.id
+        capturedMs = 0
         speechMs = 0
         silenceMs = 0
         options.onInput?.()
