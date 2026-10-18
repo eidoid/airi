@@ -32,6 +32,13 @@ import { errorFromCause } from '../../utils/error'
 import { InputPlugins } from './input-plugins'
 import { installOutputPlugins } from './output-plugins'
 
+/** An observation that stays up this long counts as healthy, so later failures may restart it again. */
+const OBSERVATION_HEALTHY_MS = 5_000
+/** The pause before an ended or failed observation starts again. */
+const OBSERVATION_RESTART_MS = 2_000
+/** Restarts without a healthy interval before the plugin stops and reports the failure. */
+const OBSERVATION_MAX_RESTARTS = 5
+
 interface VoicePluginHost<TNode> {
   activeInput: () => SpeechInputAttempt | undefined
   audio: () => AudioInput | undefined
@@ -228,8 +235,15 @@ class PluginInstallation<TNode> implements VoicePluginHandle {
         throw outcome.error
     }
 
+    /** Restarts that follow one another without a healthy interval. A loop must stop and tell the user. */
+    let failures = 0
+    let healthyTimer: ReturnType<typeof setTimeout> | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+
     const start = () => {
       void generation?.close('Audio device replaced')
+      clearTimeout(retryTimer)
+      retryTimer = undefined
       const audio = side === 'input' ? this.actions.audio() : this.actions.playback()?.output
       // Without a device, the observation waits for the next replacement.
       if (!audio || scope.signal.aborted)
@@ -237,22 +251,39 @@ class PluginInstallation<TNode> implements VoicePluginHandle {
 
       const current = scope.child()
       generation = current
+      clearTimeout(healthyTimer)
+      healthyTimer = setTimeout(() => failures = 0, OBSERVATION_HEALTHY_MS)
       // The detector publishes through task controls, so observation results need no callback.
       const observer = observe(audio, { ...settings, signal: current.signal }, detect, () => {})
       void observer.done.then((outcome) => {
-        // A replaced generation ends quietly. Source failure or completion ends the whole observation.
-        if (current.signal.aborted)
+        // A replaced generation ends quietly.
+        if (scope.signal.aborted || generation !== current)
           return
+        clearTimeout(healthyTimer)
         if (outcome.status === 'failed')
           this.report('audio', outcome.error)
-        if (outcome.status !== 'cancelled')
+        // A cancelled observation was closed on purpose. A failure or an ended source leaves the plugin deaf,
+        // so it starts again instead of waiting for the next listening restart.
+        if (outcome.status === 'cancelled') {
           completion.resolve(outcome)
-        void scope.close()
+          return
+        }
+
+        failures += 1
+        if (failures > OBSERVATION_MAX_RESTARTS) {
+          this.report('subscription', new Error('Audio observation stopped after repeated failures'))
+          completion.resolve(outcome)
+          void scope.close()
+          return
+        }
+        retryTimer = setTimeout(start, OBSERVATION_RESTART_MS)
       })
     }
 
     const binding: DeviceBinding = { restart: start }
     scope.defer(() => {
+      clearTimeout(retryTimer)
+      clearTimeout(healthyTimer)
       completion.resolve({ status: 'cancelled', reason: 'Plugin observation closed' })
       this.host.unbind(side, binding)
     })

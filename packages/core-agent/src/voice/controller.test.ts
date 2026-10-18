@@ -7,7 +7,7 @@ import { createPushStream } from '@proj-airi/stream-kit'
 import { describe, expect, it, vi } from 'vitest'
 
 import { VoiceController } from '../index'
-import { pcmSource } from '../testing/audio'
+import { keepOpen, pcmSource } from '../testing/audio'
 
 describe('voiceController input', () => {
   it('does not open the source for an already-cancelled plugin observation', async () => {
@@ -165,6 +165,35 @@ describe('voiceController input', () => {
     await controller.close()
   })
 
+  it('fails an input that waits too long for its first audio block, then admits the next one', async () => {
+    const source = createPushStream<PcmBlock>()
+    const audio = new AudioInput(pcmSource(source.stream))
+    const output = createPushStream<TranscriptionEvent>()
+    const submit = vi.fn(async () => ({ status: 'drafted' as const, draftId: 'draft' }))
+    const controller = new VoiceController({ audio, admissionTimeoutMs: 20, submit, transcriber: () => ({ transcribe: () => output.stream }) })
+    // A running detector holds the connection, so a second input reuses it instead of opening the source again.
+    const release = keepOpen(audio)
+
+    try {
+      const starved = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
+      const failed = await starved.done
+      expect(failed).toMatchObject({ status: 'failed', stage: 'source' })
+      expect(failed.status === 'failed' && failed.error.message).toContain('delivered no audio')
+
+      const next = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
+      source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 4 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+      await expect.poll(() => next.state.phase).toBe('capturing')
+      void next.end()
+      output.write({ type: 'complete', revision: 0 })
+      output.close()
+      expect(await next.done).toMatchObject({ status: 'drafted' })
+    }
+    finally {
+      release()
+      await controller.close()
+    }
+  })
+
   it('submits without the later writes of a finalization stage that exceeds its timeout', async () => {
     const source = createPushStream<PcmBlock>()
     const audio = new AudioInput(pcmSource(source.stream))
@@ -250,10 +279,12 @@ describe('voiceController input', () => {
     await observing.promise
     await Promise.resolve()
     source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 4 }, sampleRate: 1000, channels: [new Float32Array(4)] })
-    expect((await observation!.done).status).toBe('failed')
+    await expect.poll(() => onError.mock.calls.length).toBe(1)
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ plugin: 'speaker', stage: 'audio' }))
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ stage: 'plugin-diagnostic' }))
+    // A failed observation starts again instead of leaving the plugin deaf. Only close settles it.
     await controller.close()
+    expect((await observation!.done).status).toBe('cancelled')
   })
 
   it('settles cancellation and releases the provider when a UI subscriber throws', async () => {
