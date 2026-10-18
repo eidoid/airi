@@ -52,6 +52,8 @@ A finished capture reports its interval. An observer finishes when the source en
 ## Playback ownership
 
 `Playback.openGroup()` creates an independent queue. Groups can play concurrently.
+A caller that must not speak over itself passes `{ lane }`. Groups of one lane play one after another,
+in creation order. A group starts when the group before it settled, however it settled.
 `finish()` drains one group. `stop({ fadeMs })` closes admission, discards queued clips, and waits for actual silence.
 A cancelled clip does not cancel other clips in its group.
 
@@ -59,11 +61,11 @@ The driver owns the audio clock. `playback.nowMs()` reads it.
 A clip can set `startAtMs` on that clock. The group still starts clips in order.
 Each receipt entry reports `throughMs` and the rendered `interval` on the same clock.
 A caller can start the next output relative to that interval, for example 2 seconds after a clip ends.
-A group does not mix clips or schedule lanes against each other.
-Playback knows no chat session, turn, or agent notification contract.
-`Response` in core-agent supplies those conversation boundaries and producer ordering.
+A group does not mix clips. Groups play next to each other unless their caller names one lane for them.
+The lane key is opaque. Playback never reads it, and it knows no chat session or turn.
+`Response` in core-agent supplies those conversation boundaries, producer ordering, and one lane per session.
 
 ## Checks
 
 Run `pnpm -F @proj-airi/pipelines-audio typecheck` and `pnpm -F @proj-airi/pipelines-audio test:run`.
-Public tests cover capture independence, delayed history use, source gaps, file finalization, cancellation, and playback receipts.
+Public tests cover capture independence, delayed history use, source gaps, file finalization, cancellation, playback receipts, and lane order.

@@ -47,6 +47,11 @@ export interface PlaybackDriver {
   play: (clip: PlaybackClip) => PlayingAudio
 }
 
+/** Optional scheduling lane. Groups that name the same lane play one after another, in creation order. */
+export interface PlaybackGroupOptions {
+  readonly lane?: string
+}
+
 /** Group identity is fresh even when labels match. Finished and stopped groups cannot reopen. */
 export interface PlaybackGroup {
   readonly id: string
@@ -61,7 +66,11 @@ export interface PlaybackGroup {
 export interface AudioPlayback {
   /** Current driver clock time in milliseconds, for callers that compute `startAtMs`. */
   nowMs: () => number
-  openGroup: (label: string) => PlaybackGroup
+  /**
+   * Opens one queue. Without `lane`, the group plays at once, next to every other group.
+   * With `lane`, the group waits until the previous group of the same lane settled.
+   */
+  openGroup: (label: string, options?: PlaybackGroupOptions) => PlaybackGroup
 }
 
 interface PendingClip {
@@ -84,8 +93,15 @@ class OutputGroup implements PlaybackGroup {
   private sealed = false
   private stopping = false
   private settled = false
+  /** Set while this group waits for the previous group of its lane. */
+  private release: Promise<void> | undefined
+  private blocked = false
+  /** Resolves when this group settled, whatever the outcome. A lane waits on it. */
+  readonly settledAt = this.completion.promise.then(() => {})
 
-  constructor(private readonly driver: PlaybackDriver, readonly label: string) {}
+  constructor(private readonly driver: PlaybackDriver, readonly label: string, release?: Promise<void>) {
+    this.release = release
+  }
 
   enqueue(clip: PlaybackClip) {
     if (clip.startAtMs !== undefined && !Number.isFinite(clip.startAtMs)) {
@@ -144,6 +160,18 @@ class OutputGroup implements PlaybackGroup {
   private next() {
     if (this.active || this.settled || this.stopping)
       return
+    // A lane holds every clip until the group before it settled, so two turns never speak at once.
+    if (this.release) {
+      if (!this.blocked) {
+        this.blocked = true
+        void this.release.then(() => {
+          this.release = undefined
+          this.blocked = false
+          this.next()
+        })
+      }
+      return
+    }
     let entry = this.pending.shift()
     while (entry?.clip.signal?.aborted) {
       void releaseClip(entry.clip)
@@ -213,15 +241,33 @@ class OutputGroup implements PlaybackGroup {
   }
 }
 
-/** Keeps group queues independent. It does not interpret speech signals or notify an agent. */
+/**
+ * Keeps group queues independent. It does not interpret speech signals or notify an agent.
+ *
+ * Groups play next to each other by default. A caller that must not speak over itself puts its groups in one lane,
+ * and the lane plays them one after another. The lane key is opaque. Playback never reads it.
+ */
 export class Playback implements AudioPlayback {
+  /** The last group of each lane. A new group of that lane waits for it. */
+  private readonly lanes = new Map<string, Promise<void>>()
+
   constructor(private readonly driver: PlaybackDriver) {}
 
   nowMs() {
     return this.driver.nowMs()
   }
 
-  openGroup(label: string): PlaybackGroup {
-    return new OutputGroup(this.driver, label)
+  openGroup(label: string, options: PlaybackGroupOptions = {}): PlaybackGroup {
+    const { lane } = options
+    if (lane === undefined)
+      return new OutputGroup(this.driver, label)
+
+    const group = new OutputGroup(this.driver, label, this.lanes.get(lane) ?? Promise.resolve())
+    const settled = group.settledAt.then(() => {
+      if (this.lanes.get(lane) === settled)
+        this.lanes.delete(lane)
+    })
+    this.lanes.set(lane, settled)
+    return group
   }
 }
