@@ -114,7 +114,11 @@ export const useVoiceStore = defineStore('voice', () => {
   const { rephrase } = useVoiceRephrase()
   controller.use(
     createVoiceRephrasePlugin({ enabled: () => hearing.rephraseEnabled, rephrase, timeoutMs: VOICE_REPHRASE_TIMEOUT_MS }),
-    { grants: ['transcript-patch'], onError: event => report(event.error) },
+    // The rewrite is optional, and a slow model is a normal reason to keep the provider text. Its timeouts must not
+    // show as a transcription failure, because the transcript that the provider sent is already submitted.
+    { grants: ['transcript-patch'], onError: (event) => {
+      console.warn('[voice] transcript rewrite stopped, keeping the provider text', event.error)
+    } },
   )
   const { judge } = useVoiceEndJudge()
   controller.use(

@@ -95,6 +95,17 @@ describe('createVoiceRephrasePlugin', () => {
     await controller.close()
   })
 
+  it('submits the provider text when the model outlives the plugin budget', async () => {
+    const { controller, submit, speak, onError } = createHarness(() => new Promise<readonly string[]>(() => {}))
+
+    await speak([[{ text: 'hello there', final: true }]])
+
+    // The task timeout is a normal end for an optional rewrite, and the provider text still reaches the chat.
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ error: expect.objectContaining({ message: 'Plugin task timed out' }) }))
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ text: 'hello there' }), expect.any(AbortSignal))
+    await controller.close()
+  })
+
   it('submits the provider text when the model fails', async () => {
     const { controller, submit, speak } = createHarness(async () => {
       throw new Error('model unavailable')
