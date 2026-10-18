@@ -3,7 +3,7 @@ import type { LiveAudioSource, PcmBlock } from './index'
 import { createPushStream } from '@proj-airi/stream-kit'
 import { describe, expect, it, vi } from 'vitest'
 
-import { AudioInput, capture, observe } from './index'
+import { AudioInput, AudioSourceGapError, capture, observe } from './index'
 
 /**
  * A live test source whose connections the test drives by hand. Each open call starts a new connection.
@@ -185,7 +185,7 @@ describe('capture', () => {
     expect(await secondSamples).toEqual([1, 2, 3])
   })
 
-  it('fails when the source skips frames inside the captured interval', async () => {
+  it('fails with a gap error when the source skips frames inside the captured interval', async () => {
     const mic = pushSource()
     const input = new AudioInput(mic.source)
     const recording = capture(input)
@@ -193,7 +193,8 @@ describe('capture', () => {
     mic.write(0, [1])
     mic.write(4, [2])
 
-    expect(await recording.done).toMatchObject({ status: 'failed', error: new Error('Audio source has a gap') })
+    // The caller names the cause: the words that it already holds stay usable.
+    expect(await recording.done).toMatchObject({ status: 'failed', error: expect.any(AudioSourceGapError) })
   })
 
   it('reports no start and no interval when it ends before any audio', async () => {

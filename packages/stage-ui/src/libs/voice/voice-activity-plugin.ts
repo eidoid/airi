@@ -17,6 +17,18 @@ export interface VoiceActivityOptions {
   readonly acceptSpeech?: (window: AudioWindow, signal: AbortSignal) => Promise<boolean>
   readonly enabled?: () => boolean
   /**
+   * Names the reason that `enabled` is false, for example a voice message that records.
+   *
+   * A paused input drops a wake without an input, so the stage needs the reason.
+   */
+  readonly pauseReason?: () => string | undefined
+  /**
+   * Receives the reason when a wake word is consumed without starting an input.
+   *
+   * A wake is the only signal in a wake word mode, so a silent drop leaves the user with no feedback at all.
+   */
+  readonly onWakeDropped?: (reason: string) => void
+  /**
    * Receives the VAD result of each window that the plugin noted on its input, in window order.
    * The voice host traces speech segments with it, and speaker recognition counts only speech with it.
    * It never changes how the input starts or ends.
@@ -32,6 +44,11 @@ export interface VoiceActivityOptions {
    * @default 1200
    */
   readonly silenceMs?: number | (() => number)
+  /**
+   * The longest audio that one input keeps open, in milliseconds of captured windows.
+   * The input seals and keeps its words when it reaches this limit. @default 30000
+   */
+  readonly maxInputMs?: number
   /** @default 360. Speech onset retains this much audio before the detected window. */
   readonly preRollMs?: number
 }
@@ -67,9 +84,22 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
 
       // The echo gate can cost a model call, so it runs only for a window that can begin an input.
       const active = ctx.controls.activeInput()
-      const canBegin = (wake && wake.sessionId !== active?.sessionId) || (!active && score >= threshold)
+      const paused = !!options.enabled && !options.enabled()
+      const canBegin = !paused && ((wake && wake.sessionId !== active?.sessionId) || (!active && score >= threshold))
       const accepted = canBegin ? (options.acceptSpeech ? await options.acceptSpeech(window, ctx.signal) : true) : undefined
       ctx.signal.throwIfAborted()
+      if (wake) {
+        if (paused) {
+          const reason = options.pauseReason?.()
+          options.onWakeDropped?.(reason ? `Automatic input is paused: ${reason}` : 'Automatic input is paused')
+        }
+        else if (active && wake.sessionId === active.sessionId) {
+          options.onWakeDropped?.('An input is already open for this session')
+        }
+        else if (accepted === false) {
+          options.onWakeDropped?.('AIRI is speaking')
+        }
+      }
 
       scope.emit(speechActivitySignal, {
         range: window.range,

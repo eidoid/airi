@@ -6,7 +6,7 @@ import type { SpeechInputPorts, StreamingTranscriber } from './ports'
 import type { TranscriptionEvent } from './transcript'
 import type { BeginSpeechInput, SpeechContextEntry, SpeechInputAttemptOutcome, SpeechInputAttemptState, SpeechSubmission } from './types'
 
-import { capture } from '@proj-airi/pipelines-audio'
+import { AudioSourceGapError, capture } from '@proj-airi/pipelines-audio'
 import { nanoid } from 'nanoid/non-secure'
 
 import { errorFromCause } from '../../utils/error'
@@ -208,6 +208,9 @@ export class SpeechInputAttempt {
 
     this.accepted!.finishTranscription()
     const captured = await capture.done
+    // A gap ended the audio early. The provider still finalized the words that it heard.
+    if (captured.status === 'failed' && captured.error instanceof AudioSourceGapError && !this.abort.signal.aborted)
+      return true
     return captured.status === 'finished' && !this.abort.signal.aborted
   }
 
@@ -267,8 +270,14 @@ export class SpeechInputAttempt {
     const recording = capture(audio, { from, signal: this.abort.signal })
     this.capture = recording
     void recording.done.then((outcome) => {
-      if (outcome.status === 'failed')
+      // A gap means the source skipped audio. The words before the gap stay with the provider, so the input ends
+      // like a finished capture instead of failing a transcript that the user can still use.
+      if (outcome.status === 'failed' && outcome.error instanceof AudioSourceGapError && this.current.phase === 'capturing') {
+        void this.end()
+      }
+      else if (outcome.status === 'failed') {
         this.settle({ status: 'failed', stage: 'capture', error: outcome.error })
+      }
       if (outcome.status === 'cancelled')
         this.cancel(outcome.reason)
       if (outcome.status === 'finished' && this.current.phase === 'capturing')

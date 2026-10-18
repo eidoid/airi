@@ -19,12 +19,19 @@ export interface Capture {
   cancel: (reason: string) => void
 }
 
+/** The source skipped audio inside the captured interval, so the interval cannot continue as continuous audio. */
+export class AudioSourceGapError extends Error {
+  constructor() {
+    super('Audio source has a gap')
+  }
+}
+
 /**
  * Captures one interval from a shared input.
  *
  * `from` replays retained history, so speech that started before detection is included.
- * Source completion finishes the capture. A gap inside the interval fails it, because consumers
- * such as transcription providers treat the stream as continuous audio.
+ * Source completion finishes the capture. A gap inside the interval fails it with {@link AudioSourceGapError},
+ * because consumers such as transcription providers treat the stream as continuous audio.
  * When `stream` has more than `maxBufferedMs` of unread audio, the capture fails instead of growing without limit.
  */
 export function capture(input: AudioInput, options: {
@@ -82,7 +89,7 @@ export function capture(input: AudioInput, options: {
           break
 
         if (range && (block.range.sourceId !== range.sourceId || block.range.startFrame !== range.endFrame))
-          throw new Error('Audio source has a gap')
+          throw new AudioSourceGapError()
         if ((output.desiredSize() ?? 0) < 0)
           throw new Error('Capture reader fell behind')
 

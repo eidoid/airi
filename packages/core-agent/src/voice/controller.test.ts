@@ -194,6 +194,28 @@ describe('voiceController input', () => {
     }
   })
 
+  it('ends the input and keeps its words when the source skips audio', async () => {
+    const source = createPushStream<PcmBlock>()
+    const audio = new AudioInput(pcmSource(source.stream))
+    const output = createPushStream<TranscriptionEvent>()
+    const submit = vi.fn(async () => ({ status: 'drafted' as const, draftId: 'gap' }))
+    const controller = new VoiceController({ audio, transcriber: () => ({ transcribe: () => output.stream }), submit })
+    const attempt = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
+    source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 4 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+    await expect.poll(() => attempt.state.phase).toBe('capturing')
+    output.write({ type: 'update', revision: 1, segments: [{ id: 'words', revision: 1, text: 'hello', final: true, tokens: [] }] })
+
+    // The renderer stalled, so the source skipped frames. A failed transcript here would hide the words it said.
+    source.write({ range: { sourceId: 'mic', startFrame: 64, endFrame: 68 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+    await expect.poll(() => attempt.state.phase, { timeout: 2000 }).toBe('finalizing')
+    output.write({ type: 'complete', revision: 1 })
+    output.close()
+
+    expect(await attempt.done).toMatchObject({ status: 'drafted' })
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ text: 'hello' }), expect.any(AbortSignal))
+    await controller.close()
+  })
+
   it('submits without the later writes of a finalization stage that exceeds its timeout', async () => {
     const source = createPushStream<PcmBlock>()
     const audio = new AudioInput(pcmSource(source.stream))
