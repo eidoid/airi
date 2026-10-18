@@ -55,17 +55,40 @@ export async function loadKwsModel(): Promise<KWSModelPack> {
   }
 }
 
+/** The longest time one preparation step may take. A step that hangs must name itself, not stay `preparing`. */
+const KWS_STEP_TIMEOUT_MS = 15_000
+
+function withinStep<T>(step: string, work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Wake word model: ${step} did not finish within ${KWS_STEP_TIMEOUT_MS} ms`)),
+      KWS_STEP_TIMEOUT_MS,
+    )
+    work.then((value) => {
+      clearTimeout(timer)
+      resolve(value)
+    }, (cause) => {
+      clearTimeout(timer)
+      reject(cause)
+    })
+  })
+}
+
 /**
  * Creates a keyword spotter Worker with the pinned pack. The caller owns the returned spotter and must dispose it.
  *
  * The Sherpaw client and its Worker load on first use, so hosts without wake words do not load the KWS runtime.
+ * Each step has its own budget, so a stuck step names itself in the status that the stage shows.
  */
 export async function createKwsSpotter(keywords: readonly KeywordEntry[]): Promise<KeywordSpotter> {
   const [model, { createKeywordSpotter }, { default: KwsWorker }] = await Promise.all([
-    loadKwsModel(),
-    import('@sherpaw/kws'),
-    import('@sherpaw/kws/worker?worker'),
+    withinStep('model files', loadKwsModel()),
+    withinStep('runtime', import('@sherpaw/kws')),
+    withinStep('worker chunk', import('@sherpaw/kws/worker?worker')),
   ])
 
-  return createKeywordSpotter({ model, keywords, maxActivePaths: kwsSearch.maxActivePaths }, { worker: new KwsWorker() })
+  return withinStep(
+    'worker start',
+    createKeywordSpotter({ model, keywords, maxActivePaths: kwsSearch.maxActivePaths }, { worker: new KwsWorker() }),
+  )
 }
