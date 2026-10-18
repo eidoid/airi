@@ -293,7 +293,8 @@ export class VoiceResponse {
 
   constructor(turn: TurnRef, private readonly output: SpeechOutput, private readonly onClosed: () => void) {
     this.turn = Object.freeze({ ...turn })
-    this.playback = output.playback.openGroup(`${turn.sessionId}:${turn.turnId}`)
+    // One session speaks one turn at a time. A proactive reply waits for the answer that still plays.
+    this.playback = output.playback.openGroup(`${turn.sessionId}:${turn.turnId}`, { lane: turn.sessionId })
   }
 
   get closed(): boolean { return this.outcome !== undefined }

@@ -50,6 +50,34 @@ describe('voiceController output', () => {
     await controller.close()
   })
 
+  it('speaks the turns of one session one after another', async () => {
+    const played: string[] = []
+    const playback = new Playback({ nowMs: () => 0, play: clip => ({
+      done: (clip.audio as Blob).text().then((text) => {
+        played.push(text)
+        return { throughMs: 1 }
+      }),
+      stop: async () => ({ throughMs: 0 }),
+    }) })
+    const controller = new VoiceController({ speech: () => ({ playback, synthesize: async request => new Blob([request.text]) }) })
+    const answer = controller.openResponse({ sessionId: 'alice', turnId: 'answer' })
+    const proactive = controller.openResponse({ sessionId: 'alice', turnId: 'proactive' })
+
+    const answerSpeech = answer.openSpeech({ purpose: 'answer' })
+    answerSpeech.write('First.')
+    answerSpeech.end()
+    const proactiveSpeech = proactive.openSpeech({ purpose: 'notice' })
+    proactiveSpeech.write('Second.')
+    proactiveSpeech.end()
+
+    // A proactive turn waits for the reply that still speaks.
+    await expect.poll(() => [...played]).toEqual(['First.'])
+    await answer.finish()
+    await expect.poll(() => [...played]).toEqual(['First.', 'Second.'])
+    await proactive.finish()
+    await controller.close()
+  })
+
   it('preserves earlier reserved speech when an intermediate producer is cancelled', async () => {
     const firstAudio = Promise.withResolvers<Blob>()
     const played: string[] = []
