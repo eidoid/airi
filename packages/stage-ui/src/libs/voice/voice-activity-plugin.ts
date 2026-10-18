@@ -17,6 +17,12 @@ export interface VoiceActivityOptions {
   readonly acceptSpeech?: (window: AudioWindow, signal: AbortSignal) => Promise<boolean>
   readonly enabled?: () => boolean
   /**
+   * Receives the reason when a wake word is consumed without starting an input.
+   *
+   * A wake is the only signal in a wake word mode, so a silent drop leaves the user with no feedback at all.
+   */
+  readonly onWakeDropped?: (reason: string) => void
+  /**
    * Receives the VAD result of each window that the plugin noted on its input, in window order.
    * The voice host traces speech segments with it, and speaker recognition counts only speech with it.
    * It never changes how the input starts or ends.
@@ -70,6 +76,10 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       const canBegin = (wake && wake.sessionId !== active?.sessionId) || (!active && score >= threshold)
       const accepted = canBegin ? (options.acceptSpeech ? await options.acceptSpeech(window, ctx.signal) : true) : undefined
       ctx.signal.throwIfAborted()
+      if (wake && active && !canBegin)
+        options.onWakeDropped?.('Another input is already active')
+      if (wake && accepted === false)
+        options.onWakeDropped?.('AIRI is speaking')
 
       scope.emit(speechActivitySignal, {
         range: window.range,
