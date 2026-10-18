@@ -610,6 +610,11 @@ export const useVoiceStore = defineStore('voice', () => {
       // A capture lease, for example a voiceprint enrollment, records speech that can contain a wake word. It must not start an input.
       // A muted call also stops here, which cancels the speech that it was capturing.
       enabled: () => !voiceMessages.isRecording && !captureLease.held && (!callActive.value || !callMuted.value),
+      pauseReason: () => voiceMessages.isRecording
+        ? 'a voice message is recording'
+        : captureLease.held
+            ? 'another window holds the microphone'
+            : callActive.value && callMuted.value ? 'the call is muted' : undefined,
       silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_SILENCE.pauseMs + VOICE_END_SILENCE.graceMs : VOICE_END_SILENCE.pauseMs,
       // Automatic barge-in requires platform echo cancellation or an external echo classifier.
       acceptSpeech: options.acceptSpeech ?? (async () => !speaking.nowSpeaking || devices.source.echoCancellation),

@@ -16,6 +16,16 @@ export interface VoiceActivityOptions {
   /** Echo rejection runs after detection. Detectors remain active while the assistant speaks. */
   readonly acceptSpeech?: (window: AudioWindow, signal: AbortSignal) => Promise<boolean>
   readonly enabled?: () => boolean
+<<<<<<< HEAD
+=======
+  /**
+   * Names the reason that `enabled` is false, for example a voice message that records.
+   *
+   * A paused input drops a wake without an input, so the stage needs the reason.
+   */
+  readonly pauseReason?: () => string | undefined
+  readonly onInput?: () => void
+>>>>>>> 015a1ba4e (fix(stage-ui): name a paused input that drops a wake word)
   /**
    * Receives the reason when a wake word is consumed without starting an input.
    *
@@ -81,6 +91,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       if (wake && accepted === false)
         options.onWakeDropped?.('AIRI is speaking')
 
+<<<<<<< HEAD
       scope.emit(speechActivitySignal, {
         range: window.range,
         durationMs,
@@ -89,6 +100,82 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
         ...(accepted === undefined ? {} : { accepted }),
         ...(wake ? { wake } : {}),
       })
+=======
+      let input = ctx.controls.activeInput()
+
+      // A manual control owns its interval until release. VAD continues inference without ending that input.
+      if (input && input.id !== inputId) {
+        if (wake)
+          options.onWakeDropped?.('Another input is already active')
+        return
+      }
+
+      if (options.enabled && !options.enabled()) {
+        input?.cancel('Automatic speech input is paused')
+        inputId = undefined
+        if (wake) {
+          const reason = options.pauseReason?.()
+          options.onWakeDropped?.(reason ? `Automatic input is paused: ${reason}` : 'Automatic input is paused')
+        }
+        return
+      }
+
+      // The session already receives this input, so a further wake changes nothing.
+      if (wake && input && wake.sessionId === input.sessionId)
+        options.onWakeDropped?.('An input is already open for this session')
+
+      const speech = score >= (input ? (options.threshold ?? 0.6) * 0.3 : options.threshold ?? 0.6)
+      if ((wake && wake.sessionId !== input?.sessionId) || (!input && speech)) {
+        if (options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal)) {
+          if (wake)
+            options.onWakeDropped?.('AIRI is speaking')
+          return
+        }
+
+        ctx.signal.throwIfAborted()
+        const target = wake ?? options.target()
+        if (!target) {
+          if (wake)
+            options.onWakeDropped?.('No character session is available')
+          return
+        }
+
+        options.beforeBeginInput?.(wake ? 'wake-word' : 'speech')
+        const result = ctx.controls.beginInput({ ...target, start: wake
+          ? { kind: 'after-silence' }
+          : { kind: 'speech-onset', at: { sourceId: ctx.window.range.sourceId, frame: ctx.window.range.startFrame }, preRollMs: options.preRollMs ?? 360 } })
+        if (result.status !== 'started') {
+          if (wake)
+            options.onWakeDropped?.(`The input did not start: ${result.status}`)
+          return
+        }
+
+        input = result.input
+        inputId = input.id
+        speechMs = 0
+        silenceMs = 0
+        options.onInput?.()
+      }
+
+      if (!input)
+        return
+
+      if (!input.noteActivity({ range: ctx.window.range, speech }))
+        return
+      options.onActivity?.({ inputId: input.id, range: ctx.window.range, speech, durationMs: duration })
+
+      speechMs += speech ? duration : 0
+      silenceMs = speech ? 0 : silenceMs + duration
+      const silenceLimit = typeof options.silenceMs === 'function' ? options.silenceMs() : options.silenceMs ?? 1200
+      if (silenceMs >= silenceLimit) {
+        if (speechMs < (options.minSpeechMs ?? 300))
+          input.cancel('Speech segment was too short')
+        else
+          input.end()
+
+        inputId = undefined
+      }
+>>>>>>> 015a1ba4e (fix(stage-ui): name a paused input that drops a wake word)
     })
 
     return undefined
