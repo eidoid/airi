@@ -26,6 +26,13 @@ export interface WakeWordDetectionOptions {
  * The voice listener starts one detection when it starts listening and stops it when the listener is disposed.
  * While no detection runs, `preparation` is `unconfigured`, because no detector needs a model.
  */
+/** Recognition that stays up this long counts as healthy, so later failures may restart it again. */
+const WAKE_LISTEN_HEALTHY_MS = 5_000
+/** The pause before an ended or failed recognition starts again. */
+const WAKE_LISTEN_RESTART_MS = 2_000
+/** Restarts without a healthy interval before wake word detection stops and reports the failure. */
+const WAKE_LISTEN_MAX_RESTARTS = 5
+
 export const useWakeWordDetectionStore = defineStore('wake-word-detection', () => {
   const wakeWords = useWakeWordsStore()
   const devices = useSettingsAudioDevice()
@@ -94,12 +101,35 @@ export const useWakeWordDetectionStore = defineStore('wake-word-detection', () =
       if (!active)
         return
       const listening = new AbortController()
-      // A failed capture, for example a denied permission, stops recognition until the input or the catalog changes.
-      void detector.listen(input, listening.signal).done.then((outcome) => {
-        if (outcome.status === 'failed')
-          options.onError?.(outcome.error)
+      let restarts = 0
+      let retry: ReturnType<typeof setTimeout> | undefined
+      let healthy: ReturnType<typeof setTimeout> | undefined
+
+      /** Recognition ends when the capture fails or the source ends. It then starts again, so a wake stays possible. */
+      const recognize = () => {
+        clearTimeout(retry)
+        healthy = setTimeout(() => restarts = 0, WAKE_LISTEN_HEALTHY_MS)
+        void detector.listen(input, listening.signal).done.then((outcome) => {
+          clearTimeout(healthy)
+          if (listening.signal.aborted || outcome.status === 'cancelled')
+            return
+          if (outcome.status === 'failed')
+            options.onError?.(outcome.error)
+
+          restarts += 1
+          if (restarts > WAKE_LISTEN_MAX_RESTARTS) {
+            options.onError?.(new Error('Wake word detection stopped after repeated failures'))
+            return
+          }
+          retry = setTimeout(recognize, WAKE_LISTEN_RESTART_MS)
+        })
+      }
+      recognize()
+      onCleanup(() => {
+        clearTimeout(retry)
+        clearTimeout(healthy)
+        listening.abort('Wake word input changed')
       })
-      onCleanup(() => listening.abort('Wake word input changed'))
     }, { immediate: true })
     running = { detector, stopWatches: [stopCatalog, stopInput] }
 
