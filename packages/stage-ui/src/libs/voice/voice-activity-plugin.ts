@@ -14,6 +14,12 @@ export interface VoiceActivityOptions {
   /** Echo rejection runs after detection. Detectors remain active while the assistant speaks. */
   readonly acceptSpeech?: (window: AudioWindow, signal: AbortSignal) => Promise<boolean>
   readonly enabled?: () => boolean
+  /**
+   * Names the reason that `enabled` is false, for example a voice message that records.
+   *
+   * A paused input drops a wake without an input, so the stage needs the reason.
+   */
+  readonly pauseReason?: () => string | undefined
   readonly onInput?: () => void
   /**
    * Receives the reason when a wake word is consumed without starting an input.
@@ -82,8 +88,16 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       if (options.enabled && !options.enabled()) {
         input?.cancel('Automatic speech input is paused')
         inputId = undefined
+        if (wake) {
+          const reason = options.pauseReason?.()
+          options.onWakeDropped?.(reason ? `Automatic input is paused: ${reason}` : 'Automatic input is paused')
+        }
         return
       }
+
+      // The session already receives this input, so a further wake changes nothing.
+      if (wake && input && wake.sessionId === input.sessionId)
+        options.onWakeDropped?.('An input is already open for this session')
 
       const speech = score >= (input ? (options.threshold ?? 0.6) * 0.3 : options.threshold ?? 0.6)
       if ((wake && wake.sessionId !== input?.sessionId) || (!input && speech)) {

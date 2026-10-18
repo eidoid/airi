@@ -31,6 +31,28 @@ it('reports a wake word that starts no input because the assistant speaks', asyn
   await controller.close()
 })
 
+it('names the reason when a paused input drops a wake word', async () => {
+  const source = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })
+  const onWakeDropped = vi.fn()
+  const controller = new VoiceController({ audio, submit: vi.fn(), transcriber: vi.fn() })
+  controller.use(createVoiceActivityPlugin({
+    detect: async () => 0,
+    target: () => ({ sessionId: 'alice', interruptTurns: [] }),
+    detectWakeWord: async () => ({ sessionId: 'alice', interruptTurns: [] }),
+    enabled: () => false,
+    pauseReason: () => 'another window holds the microphone',
+    onWakeDropped,
+    minSpeechMs: 32,
+    silenceMs: 64,
+  }), { grants: ['input-control', 'cancel-input'] })
+  await Promise.resolve()
+  source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 32 }, sampleRate: 1000, channels: [new Float32Array(32)] })
+
+  await vi.waitFor(() => expect(onWakeDropped).toHaveBeenCalledWith('Automatic input is paused: another window holds the microphone'))
+  await controller.close()
+})
+
 it('uses ordered VAD signals to capture, stream transcription, and submit to the accepted session', async () => {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })
