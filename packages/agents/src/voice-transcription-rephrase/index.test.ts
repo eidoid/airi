@@ -29,5 +29,6 @@ describe('createVoiceTranscriptionRephraseAgent', () => {
 
     await expect(agent.rephrase(['uh hello', 'world'], new AbortController().signal)).resolves.toEqual(['Hello.', 'World.'])
     expect(generateText.mock.calls[0]?.[0]).toMatchObject({ turns: [{ type: 'system' }, { type: 'user', content: [{ text: '["uh hello","world"]' }] }] })
+    expect(JSON.stringify(generateText.mock.calls[0]?.[0])).toContain('Do not translate it.')
   })
 })
