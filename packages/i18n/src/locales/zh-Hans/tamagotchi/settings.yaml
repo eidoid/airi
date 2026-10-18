@@ -550,6 +550,9 @@ devtools:
       recording:
         title: 自动记录 IO Trace
         description: 把已结束的 IO span 以 JSON Lines 保存在应用数据目录，供 Agent 分析。七天前的文件会被自动删除。
+    stage-diagnostics:
+      title: 记录舞台诊断
+      description: 每五秒采样舞台窗口的帧率、堆内存和语音状态，最近二十分钟保存在本地存储里，重启后仍可查看卡顿或麦克风失联时的现场。
     widgets-calling:
       title: 小组件调用
 screen-capture:

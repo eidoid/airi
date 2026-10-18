@@ -551,6 +551,9 @@ devtools:
       recording:
         title: Record IO traces automatically
         description: Save ended IO spans as JSON Lines in the app data folder so coding agents can analyze them. Files older than seven days are removed.
+    stage-diagnostics:
+      title: Record stage diagnostics
+      description: Sample the frame rate, the heap, and the voice state of the stage window every five seconds. The last twenty minutes stay in local storage, so a slow window or a silent microphone can be read after a restart.
     widgets-calling:
       title: Widget Calling
 

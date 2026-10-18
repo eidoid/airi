@@ -20,6 +20,7 @@ import {
 } from '@proj-airi/stage-ui/components/scenarios/settings/model-settings/runtime'
 import { WidgetStage } from '@proj-airi/stage-ui/components/scenes'
 import { useCanvasPixelIsTransparentAtPoint } from '@proj-airi/stage-ui/composables/canvas-alpha'
+import { useStageDiagnostics } from '@proj-airi/stage-ui/composables/use-stage-diagnostics'
 import { useVoiceListening } from '@proj-airi/stage-ui/composables/voice-input-mode'
 import { FULLSCREEN_WORKSPACE_FLAG } from '@proj-airi/stage-ui/libs/feature-flags'
 import { useFeatureFlagsStore } from '@proj-airi/stage-ui/stores/feature-flags'
@@ -649,6 +650,8 @@ useProactiveSpeechStore().ownScheduler()
 
 const openInlay = useElectronEventaInvoke(electronOpenInlay)
 useVoiceListening()
+// Opt-in from the developer settings. It samples this window, because it owns the voice host.
+useStageDiagnostics()
 usePushToTalkShortcut()
 // The inlay stays shown from startup and draws a capsule when any capture starts.
 // This call shows it again after the user hid it. A failed begin never reaches `capturing`.

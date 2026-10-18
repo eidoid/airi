@@ -4,6 +4,7 @@ import type { IOTraceRecordingState } from '@proj-airi/stage-shared/types/io-tra
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { ButtonBar, CheckBar, IconItem } from '@proj-airi/stage-ui/components'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
+import { useSettingsDeveloper } from '@proj-airi/stage-ui/stores/settings/developer'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -12,6 +13,7 @@ import { electronOpenDevtoolsWindow, electronOpenEditor, electronOpenMainDevtool
 
 const { t } = useI18n()
 const settings = useSettings()
+const developer = useSettingsDeveloper()
 const router = useRouter()
 const eventaContext = useElectronEventaContext()
 const getIOTraceRecording = useElectronEventaInvoke(ioTraceRecordingGet)
@@ -201,6 +203,15 @@ const openEditor = useElectronEventaInvoke(electronOpenEditor)
   >
     {{ t('tamagotchi.settings.devtools.pages.lag-visualizer.title') }}
   </ButtonBar>
+  <CheckBar
+    v-model="developer.stageDiagnostics"
+    :class="['mb-2', 'transition-all duration-250 ease-in-out']"
+    icon-on="i-solar:heart-pulse-bold-duotone"
+    icon-off="i-solar:heart-pulse-linear"
+    text="tamagotchi.settings.devtools.pages.stage-diagnostics.title"
+    description="tamagotchi.settings.devtools.pages.stage-diagnostics.description"
+    transition="all ease-in-out duration-250"
+  />
   <CheckBar
     v-model="settings.disableTransitions"
     :class="['mb-2', 'transition-all duration-250 ease-in-out']"
