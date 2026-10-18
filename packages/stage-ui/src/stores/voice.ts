@@ -134,13 +134,13 @@ export const useVoiceStore = defineStore('voice', () => {
     onError: event => report(event.error),
   })
   const { rephrase } = useVoiceRephrase()
-  // Both post-processing plugins ask the model for a strict JSON answer. Only
-  // run them on an explicitly configured helper model: falling back to the
-  // chat model made reasoning models time out and return <think> text inside
-  // the voice input path.
   controller.use(
-    createVoiceRephrasePlugin({ enabled: () => hearing.rephraseEnabled && !!hearing.rephraseProvider, rephrase, timeoutMs: VOICE_REPHRASE_TIMEOUT_MS }),
-    { onError: event => report(event.error) },
+    createVoiceRephrasePlugin({ enabled: () => hearing.rephraseEnabled, rephrase, timeoutMs: VOICE_REPHRASE_TIMEOUT_MS }),
+    // The rewrite is optional, and a slow model is a normal reason to keep the provider text. Its timeouts must not
+    // show as a transcription failure, because the transcript that the provider sent is already submitted.
+    { onError: (event) => {
+      console.warn('[voice] transcript rewrite stopped, keeping the provider text', event.error)
+    } },
   )
   // Motion that follows the voice, for example the MAGIC speaking profile, reads this level in every window.
   controller.use(
