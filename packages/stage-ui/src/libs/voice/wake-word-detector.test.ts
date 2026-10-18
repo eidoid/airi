@@ -102,6 +102,33 @@ describe('wakeWordDetector', () => {
     expect(harness.onPreparationChange).toHaveBeenLastCalledWith('ready')
   })
 
+  it('keeps the prepared spotter when the same list arrives again while it prepares', async () => {
+    const gate = Promise.withResolvers<void>()
+    const spotter = {
+      processAudio: vi.fn<KeywordSpotter['processAudio']>(async () => []),
+      setKeywords: vi.fn<KeywordSpotter['setKeywords']>(async () => {}),
+      reset: vi.fn<KeywordSpotter['reset']>(async () => {}),
+      dispose: vi.fn<KeywordSpotter['dispose']>(),
+    }
+    const createSpotter = vi.fn(async () => {
+      await gate.promise
+      return spotter
+    })
+    const harness = createHarness({ createSpotter })
+    const [alice] = pronunciations([{ characterId: 'alice', text: 'Alice', tokens: [['AE1', 'L', 'IH0', 'S']] }])
+
+    // A recomputed catalog produces a new array with the same pronunciations while the model loads.
+    const first = harness.detector.setPronunciations([alice!])
+    const second = harness.detector.setPronunciations([alice!])
+    gate.resolve()
+    await Promise.all([first, second])
+
+    await vi.waitFor(() => expect(harness.onPreparationChange).toHaveBeenLastCalledWith('ready'))
+    expect(createSpotter).toHaveBeenCalledOnce()
+    expect(spotter.dispose).not.toHaveBeenCalled()
+    harness.listening.abort('done')
+  })
+
   it('keeps recognizing while a character session loads slowly', async () => {
     const session = Promise.withResolvers<{ sessionId: string, interruptTurns: [] }>()
     const harness = createHarness({ resolveTarget: () => session.promise })

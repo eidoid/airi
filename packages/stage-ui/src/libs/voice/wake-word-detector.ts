@@ -83,6 +83,10 @@ export interface WakeActivity {
   readonly durationMs: number
 }
 
+function keywordSignature(keywords: readonly KeywordEntry[]) {
+  return keywords.map(keyword => `${keyword.label}:${keyword.matches?.map(match => match.tokens.join(' ')).join('/') ?? ''}`).join('|')
+}
+
 /** How long one match waits for its character session before the detector reports and continues. */
 const WAKE_TARGET_TIMEOUT_MS = 5_000
 
@@ -160,9 +164,12 @@ export class WakeWordDetector {
     this.keywordsReady = false
     const generation = this.generation
     const keywords = this.keywordsOf([...next.values()])
+    // The keywords decide validity, not the map identity. A recomputed catalog repeats the same list, and a
+    // comparison by identity dropped the spotter that this update had just prepared.
+    const signature = keywordSignature(keywords)
     const update = this.updates.then(async () => {
       // A newer list or a stop replaced this one while an earlier update ran.
-      if (generation !== this.generation || next !== this.pronunciations)
+      if (generation !== this.generation || signature !== this.currentSignature())
         return
 
       if (keywords.length === 0) {
@@ -171,7 +178,6 @@ export class WakeWordDetector {
         return
       }
 
-      console.info('[wake-word] preparing spotter', keywords.length, 'keywords, generation', this.generation, 'of', generation)
       this.options.onPreparationChange?.('preparing')
       try {
         if (this.spotter) {
@@ -187,7 +193,6 @@ export class WakeWordDetector {
         }
       }
       catch (error) {
-        console.info('[wake-word] preparation failed', errorMessageFrom(error) ?? 'unknown', 'generation', this.generation, 'of', generation)
         if (generation === this.generation)
           this.options.onPreparationChange?.('error', errorMessageFrom(error) ?? 'Wake word model failed to prepare')
         throw error
@@ -196,12 +201,9 @@ export class WakeWordDetector {
       // A keyword update starts a new stream in the Worker.
       this.streamSampleRate = undefined
       this.resetStream = false
-      if (generation !== this.generation || next !== this.pronunciations) {
-        console.info('[wake-word] prepared spotter dropped, generation', this.generation, 'of', generation, 'same list', next === this.pronunciations)
+      if (generation !== this.generation || signature !== this.currentSignature())
         return
-      }
       this.keywordsReady = true
-      console.info('[wake-word] ready')
       this.options.onPreparationChange?.('ready')
     })
     this.updates = update.catch(() => {})
@@ -270,6 +272,11 @@ export class WakeWordDetector {
 
     this.collect(window)
     void this.recognize(this.generation)
+  }
+
+  /** Identifies the keyword list that a prepared spotter carries. */
+  private currentSignature() {
+    return keywordSignature(this.keywordsOf([...this.pronunciations.values()]))
   }
 
   /**
