@@ -102,6 +102,40 @@ describe('wakeWordDetector', () => {
     expect(harness.onPreparationChange).toHaveBeenLastCalledWith('ready')
   })
 
+  it('keeps recognizing while a character session loads slowly', async () => {
+    const session = Promise.withResolvers<{ sessionId: string, interruptTurns: [] }>()
+    const harness = createHarness({ resolveTarget: () => session.promise })
+    const [alice] = pronunciations([{ characterId: 'alice', text: 'Alice', tokens: [['AE1', 'L', 'IH0', 'S']] }])
+    await harness.detector.setPronunciations([alice!])
+    harness.spotter.processAudio.mockResolvedValueOnce([detection(alice!)])
+
+    harness.microphone.write()
+    // The second batch must reach the Worker although the first match still waits for its session.
+    harness.spotter.processAudio.mockResolvedValueOnce([])
+    harness.microphone.write()
+    await vi.waitFor(() => expect(harness.spotter.processAudio).toHaveBeenCalledTimes(2))
+    expect(harness.detector.take(new AbortController().signal)).toBeUndefined()
+
+    session.resolve({ sessionId: 'session-alice', interruptTurns: [] })
+    expect(await nextWake(harness.detector)).toEqual({ sessionId: 'session-alice', interruptTurns: [] })
+    expect(harness.onError).not.toHaveBeenCalled()
+    harness.listening.abort('done')
+  })
+
+  it('reports a session that does not load in time and keeps recognizing', async () => {
+    const harness = createHarness({ resolveTarget: () => new Promise(() => {}), resolveTimeoutMs: 20 })
+    const [alice] = pronunciations([{ characterId: 'alice', text: 'Alice', tokens: [['AE1', 'L', 'IH0', 'S']] }])
+    await harness.detector.setPronunciations([alice!])
+    harness.spotter.processAudio.mockResolvedValueOnce([detection(alice!)])
+
+    harness.microphone.write()
+    await vi.waitFor(() => expect(harness.onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('did not load') })))
+    harness.spotter.processAudio.mockResolvedValueOnce([])
+    harness.microphone.write()
+    await vi.waitFor(() => expect(harness.spotter.processAudio).toHaveBeenCalledTimes(2))
+    harness.listening.abort('done')
+  })
+
   it('adds search settings and variants, and keeps each token sequence with its first owner', async () => {
     const variants = vi.fn((tokens: readonly string[]) => tokens[0] === 'h' ? [['h', 'èi'], ['b', 'ā']] : [['b', 'à']])
     const harness = createHarness({ search: { score: 1.5, threshold: 0.1 }, variants })

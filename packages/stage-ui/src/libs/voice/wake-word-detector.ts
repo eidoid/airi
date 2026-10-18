@@ -68,6 +68,13 @@ export interface WakeWordDetectorOptions {
    * A sequence that another pronunciation already uses stays with that pronunciation.
    */
   readonly variants?: (tokens: readonly string[]) => readonly (readonly string[])[]
+  /**
+   * The longest time that one match waits for its character session. Recognition continues meanwhile, because a
+   * session that loads slowly must not stop the next match.
+   *
+   * @default 5000
+   */
+  readonly resolveTimeoutMs?: number
 }
 
 /** VAD evidence for the window that the voice activity plugin observed with this call. */
@@ -75,6 +82,9 @@ export interface WakeActivity {
   readonly speech: boolean
   readonly durationMs: number
 }
+
+/** How long one match waits for its character session before the detector reports and continues. */
+const WAKE_TARGET_TIMEOUT_MS = 5_000
 
 /** A complete batch that waits for the Worker. `reset` starts a new stream before this batch. */
 interface RecognitionBatch {
@@ -344,8 +354,9 @@ export class WakeWordDetector {
           // The label is a catalog key. A key outside the current catalog belongs to a replaced keyword list.
           .map(detection => this.pronunciations.get(detection.label))
           .find(candidate => candidate !== undefined)
+        // Routing a match loads a session, which can be slow. The next batch must not wait for it.
         if (pronunciation)
-          await this.resolveWake(pronunciation, generation)
+          void this.resolveWake(pronunciation, generation)
       }
     }
     catch (error) {
@@ -366,7 +377,7 @@ export class WakeWordDetector {
   private async resolveWake(pronunciation: WakePronunciation, generation: number) {
     const signal = this.lifetime.signal
     try {
-      const target = await this.options.resolveTarget(pronunciation.characterId, signal, pronunciation)
+      const target = await this.withinTargetBudget(this.options.resolveTarget(pronunciation.characterId, signal, pronunciation))
       if (generation === this.generation && !signal.aborted)
         this.wake = target
     }
@@ -374,6 +385,21 @@ export class WakeWordDetector {
       if (generation === this.generation && !signal.aborted)
         this.options.onError?.(error)
     }
+  }
+
+  /** A session that never loads must not leave the match pending forever, and must not hide why. */
+  private withinTargetBudget<T>(target: Promise<T>): Promise<T> {
+    const timeoutMs = this.options.resolveTimeoutMs ?? WAKE_TARGET_TIMEOUT_MS
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`The character session did not load within ${timeoutMs} ms`)), timeoutMs)
+      target.then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      }, (cause) => {
+        clearTimeout(timer)
+        reject(cause)
+      })
+    })
   }
 
   /** Ends the current generation. Its queued audio, Worker results, and resolved wake are discarded. */

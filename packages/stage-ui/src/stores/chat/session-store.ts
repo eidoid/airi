@@ -8,6 +8,7 @@ import type { ChatSessionMeta, ChatSessionRecord, ChatSessionsExport, ChatSessio
 
 import { errorMessageFrom } from '@moeru/std'
 import { cloneDeep } from 'es-toolkit'
+import { timeout as promiseTimeout } from 'es-toolkit/promise'
 import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
@@ -56,6 +57,15 @@ export interface DeleteChatMessagePayload {
  * and so a future schema migration / manual replay can recover them.
  */
 const OUTBOX_MAX_ATTEMPTS = 5
+
+/**
+ * The longest time a session load waits for its cloud pull.
+ *
+ * The chat socket rejects an invoke when the socket dies, but a socket that stays open without answering keeps the
+ * promise pending forever. The character session that a wake word routes to waits for this load, so the budget keeps
+ * one silent request from blocking every later wake word.
+ */
+const CLOUD_HYDRATION_TIMEOUT_MS = 4_000
 
 const useChatSessionSelectionStore = defineStore('chat-session-selection', () => {
   const activeSessionId = ref('')
@@ -421,8 +431,16 @@ export const useChatSessionStore = defineStore('chat-session', () => {
 
         // Local and cloud hydration are separate. A failed cloud pull leaves
         // the local view usable and keeps the next selection eligible to retry.
-        if (needsCloudHydration())
-          await pullCloudMessages(sessionId)
+        if (needsCloudHydration()) {
+          try {
+            // A socket that stays open without answering would hold this load and every caller that waits for it,
+            // such as the character session that a wake word routes to. The pull keeps running and merges later.
+            await Promise.race([pullCloudMessages(sessionId), promiseTimeout(CLOUD_HYDRATION_TIMEOUT_MS)])
+          }
+          catch (cause) {
+            console.warn('[chat-session] cloud hydration did not finish for', sessionId, errorMessageFrom(cause))
+          }
+        }
 
         // Missing IDB payloads still need a valid canonical conversation.
         // This action runs in the elected leader, so the initialized history

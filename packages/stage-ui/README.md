@@ -122,6 +122,8 @@ It validates tokens against the pinned KWS vocabulary in `libs/voice/kws-model`.
 That processing changes the phones that the keyword model hears. The second capture opens only while the catalog has an active pronunciation.
 The detector queues 100 ms batches of finite mono samples for a Sherpaw keyword spotter Worker. Sherpa-ONNX resamples them to the model rate.
 Recognition does not wait for the Worker. The voice activity plugin collects a wake on its next window. A backlog over 1 second is dropped.
+Routing a match loads its character session, which can wait on the network. Recognition continues meanwhile, and a session that misses its budget is reported instead of blocking the next match.
+A recognition that fails or ends starts again after 2 seconds, so a wake stays possible without a listening restart.
 The plugin also passes its VAD result to the detector. A pause of 0.5 seconds starts a new spotter stream, because a stream that runs for minutes misses most calls.
 Each keyword uses the search settings of `kwsSearch` and adds tone variants from `kwsToneVariants`. A variant changes the tone of one pinyin final, because a called name often changes its tone.
 A match maps through the active catalog to `voice.resolveWakeTarget(characterId, signal)`. This selects a session without navigating the chat window.
