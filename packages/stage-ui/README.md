@@ -86,6 +86,10 @@ The voice host publishes the detector preparation in its snapshot as `wakeWords`
 Each stage page calls `useVoiceListening` once. It is the one place that starts or stops continuous listening.
 `listensContinuously(mode)` in `stores/modules/hearing.ts` decides which modes run detection and keep the microphone open.
 To add a mode, extend `HearingInputMode`, `listensContinuously`, `startsInputOnSpeech`, and `useVoiceListening`.
+Silero VAD scores each window in a worker (`workers/vad/silero-vad.worker.ts`), because inference at 31 windows per second must not share the window's thread with rendering.
+A failed worker rejects every later window, so a broken detector fails the observation and reaches the status capsule instead of passing for silence.
+`useStageDiagnostics` samples the frame rate, the heap, and this voice state every five seconds while the developer setting is on.
+It keeps the newest twenty minutes in `localStorage` under `diagnostics/stage-samples`, so a slow window or a silent microphone can be read after a restart.
 
 `useVoicePushToTalk` connects a hold to `voice.beginManual`. The press captures the active session, so a session switch during the hold does not move the speech.
 `useVoiceHold` owns the hold lifecycle: it ignores key repeats, cancels a tap shorter than 300 ms, and cancels on disable or disposal.
