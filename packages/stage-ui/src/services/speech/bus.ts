@@ -89,7 +89,7 @@ export interface VoiceHostSnapshot {
   readonly connected: boolean
   readonly microphone?: { readonly enabled: boolean, readonly ready: boolean, readonly error?: string }
   /** Preparation of the host's wake word detector. Settings in other windows read it from here. */
-  readonly wakeWords?: { readonly preparation: WakeWordPreparation, readonly error?: string }
+  readonly wakeWords?: { readonly preparation: WakeWordPreparation, readonly error?: string, readonly matches?: number }
   readonly input?: {
     readonly requestId: string
     readonly sessionId: string

@@ -3,7 +3,9 @@ import type { AudioWindow } from '@proj-airi/pipelines-audio'
 
 import type { WakeActivity, WakeTarget, WakeWordPreparation } from '../libs/voice/wake-word-detector'
 
+import { errorMessageFrom } from '@moeru/std'
 import { IOAttributes, IOSpanNames, IOSubsystems } from '@proj-airi/stage-shared'
+import { timeout as promiseTimeout } from 'es-toolkit/promise'
 import { defineStore } from 'pinia'
 import { computed, shallowRef, watch } from 'vue'
 
@@ -26,6 +28,8 @@ export interface WakeWordDetectionOptions {
  * The voice listener starts one detection when it starts listening and stops it when the listener is disposed.
  * While no detection runs, `preparation` is `unconfigured`, because no detector needs a model.
  */
+/** The longest time the keyword model may take to load before the failure becomes visible. */
+const WAKE_PREPARATION_TIMEOUT_MS = 20_000
 /** Recognition that stays up this long counts as healthy, so later failures may restart it again. */
 const WAKE_LISTEN_HEALTHY_MS = 5_000
 /** The pause before an ended or failed recognition starts again. */
@@ -95,7 +99,15 @@ export const useWakeWordDetectionStore = defineStore('wake-word-detection', () =
     })
     const stopCatalog = watch(pronunciations, (value) => {
       // The detector reports a failed update as `error`. The next catalog change or restart retries.
-      void detector.setPronunciations(value).catch(() => {})
+      // A model load that never settles would otherwise stay `preparing` forever, and the stage would claim to listen.
+      const update = detector.setPronunciations(value)
+      void Promise.race([update, promiseTimeout(WAKE_PREPARATION_TIMEOUT_MS)])
+        .catch((cause) => {
+          if (running?.detector !== detector)
+            return
+          preparation.value = 'error'
+          error.value = errorMessageFrom(cause) ?? 'The wake word model did not load'
+        })
     }, { immediate: true })
     const stopInput = watch([() => pronunciations.value.length > 0, () => devices.unprocessedInput], ([active, input], _previous, onCleanup) => {
       if (!active)

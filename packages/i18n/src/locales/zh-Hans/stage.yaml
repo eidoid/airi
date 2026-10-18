@@ -302,6 +302,8 @@ status:
   hearing-error: 语音转写出错了
   wake-word-error: 唤醒词检测失败
   wake-word-unconfigured: 没有角色设置唤醒词，只能手动开始输入
+  wake-word-preparing: 正在准备唤醒词模型
+  wake-word-summary: 唤醒词 {state}，已命中 {matches} 次
   no-transcript: 识别到的内容会显示在这里。
   signing-in: 请在浏览器中完成登录
   confirming: 正在确认登录

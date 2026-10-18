@@ -9,7 +9,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
 import { turnKey } from '@proj-airi/core-agent'
 import { defineStore, storeToRefs } from 'pinia'
-import { onScopeDispose, shallowRef, watch } from 'vue'
+import { onScopeDispose, ref, shallowRef, watch } from 'vue'
 
 import { useVoiceController } from '../composables/audio/voice-controller'
 import { traceSpeechOutput } from '../composables/speech-output-trace'
@@ -61,6 +61,9 @@ export const useVoiceStore = defineStore('voice', () => {
   const wakeWordDetection = useWakeWordDetectionStore()
   const voiceprints = useVoiceprintStore()
   const speakerTracker = useSpeakerTrackerStore()
+  /** Wake words that matched since the window opened. The stage shows it, because a silent microphone needs a reason. */
+  const wakeMatches = ref(0)
+
   const { stream: microphoneStream, enabled: microphoneEnabled, error: microphoneError } = storeToRefs(devices)
   /** The application tool selection for spoken turns. Without a connection, spoken turns send no tools. */
   let requestTools: (() => readonly ChatToolReference[]) | undefined
@@ -153,7 +156,7 @@ export const useVoiceStore = defineStore('voice', () => {
     const snapshot: VoiceHostSnapshot = {
       connected: true,
       microphone: { enabled: devices.enabled, ready: !!devices.stream, error: devices.error },
-      wakeWords: { preparation: wakeWordDetection.preparation, ...(wakeWordDetection.error ? { error: wakeWordDetection.error } : {}) },
+      wakeWords: { preparation: wakeWordDetection.preparation, matches: wakeMatches.value, ...(wakeWordDetection.error ? { error: wakeWordDetection.error } : {}) },
       drafts: drafts.value.map(draft => ({ ...draft })),
       frontDraftId: frontDraftId.value,
       error: error.value,
@@ -577,6 +580,7 @@ export const useVoiceStore = defineStore('voice', () => {
   /** A KWS adapter calls this only after the device's pronunciation catalog selects a character. */
   async function resolveWakeTarget(characterId: string, signal: AbortSignal) {
     signal.throwIfAborted()
+    wakeMatches.value += 1
     const sessionId = await sessions.ensureCharacterSession(characterId)
     signal.throwIfAborted()
 
