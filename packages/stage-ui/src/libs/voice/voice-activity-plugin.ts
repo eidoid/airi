@@ -114,8 +114,12 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       if (input && input.id === inputId) {
         capturedMs += duration
         if (capturedMs >= (options.maxInputMs ?? 30_000)) {
-          // The words stay. An input that never ends would block every later input of its session.
-          void input.end()
+          // An input that never ends would block every later input of its session.
+          // Without speech it holds only room tone, and a transcription of room tone invents words.
+          if (speechMs >= (options.minSpeechMs ?? 300))
+            void input.end()
+          else
+            input.cancel('The input captured no speech')
           inputId = undefined
           capturedMs = 0
           speechMs = 0

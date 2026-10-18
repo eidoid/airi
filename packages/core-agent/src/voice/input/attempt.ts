@@ -8,7 +8,7 @@ import type { EndDetectionOptions, EndDetector, SpeechActivityEvidence } from '.
 import type { SpeechInputPorts, StreamingTranscriber } from './submission'
 import type { TranscriptionEvent } from './transcript'
 
-import { capture, observe } from '@proj-airi/pipelines-audio'
+import { AudioSourceGapError, capture, observe } from '@proj-airi/pipelines-audio'
 import { nanoid } from 'nanoid/non-secure'
 
 import { errorFromCause } from '../../utils/error'
@@ -107,8 +107,13 @@ export class SpeechInputAttempt {
       return false
 
     if (range.startFrame > this.activityEnd) {
+      // Audio was skipped, for example when the renderer stalled. The input cannot wait for continuity that never
+      // returns, because every later window would stay rejected and the silence rule would never end it.
       this.endProposal = undefined
-      return false
+      this.activityEnd = range.endFrame
+      if (evidence.speech)
+        this.speechRevision += 1
+      return true
     }
 
     this.activityEnd = range.endFrame
@@ -312,6 +317,9 @@ export class SpeechInputAttempt {
 
     this.accepted!.finishTranscription()
     const captured = await capture.done
+    // A gap ended the audio early. The provider still finalized the words that it heard.
+    if (captured.status === 'failed' && captured.error instanceof AudioSourceGapError && !this.abort.signal.aborted)
+      return true
     return captured.status === 'finished' && !this.abort.signal.aborted
   }
 
@@ -363,8 +371,14 @@ export class SpeechInputAttempt {
     const recording = capture(audio, { from, signal: this.abort.signal })
     this.capture = recording
     void recording.done.then((outcome) => {
-      if (outcome.status === 'failed')
+      // A gap means the source skipped audio. The words before the gap stay with the provider, so the input ends
+      // like a finished capture instead of failing a transcript that the user can still use.
+      if (outcome.status === 'failed' && outcome.error instanceof AudioSourceGapError && this.current.phase === 'capturing') {
+        void this.end()
+      }
+      else if (outcome.status === 'failed') {
         this.settle({ status: 'failed', stage: 'capture', error: outcome.error })
+      }
       if (outcome.status === 'cancelled')
         this.cancel(outcome.reason)
       if (outcome.status === 'finished' && this.current.phase === 'capturing')

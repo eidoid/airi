@@ -25,6 +25,28 @@ describe('voiceController end detection', () => {
     await controller.close()
   })
 
+  it('accepts activity again after the window stream skipped audio', async () => {
+    const source = createPushStream<PcmBlock>()
+    const audio = new AudioInput(pcmSource(source.stream))
+    const output = createPushStream<TranscriptionEvent>()
+    const controller = new VoiceController({ audio, transcriber: () => ({ transcribe: () => output.stream }), submit: vi.fn() })
+    const attempt = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
+    for (const startFrame of [0, 4, 8]) {
+      source.write({ range: { sourceId: 'mic', startFrame, endFrame: startFrame + 4 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+      await expect.poll(() => audio.position?.frame).toBe(startFrame + 4)
+    }
+    await expect.poll(() => attempt.state.phase).toBe('capturing')
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 0, endFrame: 4 }, speech: true })).toBe(true)
+
+    // The detector skipped the window of frames 4 to 8. Later windows still decide the end of this input.
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 8, endFrame: 12 }, speech: false })).toBe(true)
+    source.write({ range: { sourceId: 'mic', startFrame: 12, endFrame: 16 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+    await expect.poll(() => audio.position?.frame).toBe(16)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 12, endFrame: 16 }, speech: false })).toBe(true)
+    attempt.cancel('Finished observation')
+    await controller.close()
+  })
+
   it('waits for admission, replaces detectors, and holds end proposals for overlapping VAD coverage', async () => {
     const source = createPushStream<PcmBlock>()
     const audio = new AudioInput(pcmSource(source.stream))
