@@ -133,6 +133,11 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   let greetingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
   let disposed = false
+  /**
+   * The voice host reports whether it still speaks. A proactive line that arrives during playback would queue behind
+   * the reply, so it waits for the next trigger instead. The window without a voice host leaves this undefined.
+   */
+  let speakingGate: (() => boolean) | undefined
   let schedulerOwned = false
 
   function clearTimer() {
@@ -262,14 +267,17 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
 
   /**
    * Checks whether the user is currently active — either the orchestrator is
-   * sending a message (LLM generating) or a user message was sent within the
-   * cooldown window.
+   * sending a message (LLM generating), the voice host still speaks, or a user
+   * message was sent within the cooldown window.
    *
    * Use when:
    * - Deciding whether to skip a proactive speech trigger.
    */
   function isUserActive(): boolean {
     if (isOrchestratorSending.value)
+      return true
+    // `sending` clears when the model finishes, while its audio can still play for many seconds.
+    if (speakingGate?.())
       return true
 
     const sessionId = activeSessionId.value
@@ -519,6 +527,18 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     },
   )
 
+  /**
+   * Connects the voice host that can still speak a turn. The returned function disconnects this source only.
+   * A proactive trigger waits while the source reports speech, so the two never queue back to back.
+   */
+  function connectSpeakingGate(source: () => boolean): () => void {
+    speakingGate = source
+    return () => {
+      if (speakingGate === source)
+        speakingGate = undefined
+    }
+  }
+
   onScopeDispose(() => {
     disposed = true
     clearTimer()
@@ -535,6 +555,7 @@ export const useProactiveSpeechStore = defineStore('proactive-speech', () => {
     start,
     stop,
     ownScheduler,
+    connectSpeakingGate,
     trigger: runTrigger,
   }
 })

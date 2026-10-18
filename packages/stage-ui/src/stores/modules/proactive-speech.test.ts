@@ -134,6 +134,25 @@ describe('proactive speech store', () => {
     expect(deps.ingest).not.toHaveBeenCalled()
   })
 
+  it('skips while the voice host still speaks an earlier turn', async () => {
+    settings.enabled = true
+    sessionMessages = [message('system')]
+    const disconnect = store.connectSpeakingGate(() => true)
+
+    try {
+      const outcome = await store.trigger({ manual: true })
+      expect(outcome?.skippedReason).toBe('user is active')
+      expect(deps.emitTextOutput).not.toHaveBeenCalled()
+    }
+    finally {
+      disconnect()
+    }
+
+    // A disconnected gate releases the trigger, so the queued greeting speaks now.
+    await store.trigger({ manual: true })
+    expect(deps.emitTextOutput).toHaveBeenCalledWith('Hello there!')
+  })
+
   it('speaks the card greeting of a fresh session instead of calling the LLM', async () => {
     settings.enabled = true
     sessionMessages = [message('system')]
