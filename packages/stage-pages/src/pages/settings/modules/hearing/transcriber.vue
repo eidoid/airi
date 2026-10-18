@@ -8,12 +8,12 @@ import { useAnalytics, useHearingPlaygroundSegments } from '@proj-airi/stage-ui/
 import { useVoiceController } from '@proj-airi/stage-ui/composables/audio/voice-controller'
 import { hearingProviderViewContextKey } from '@proj-airi/stage-ui/libs'
 import { createVoiceActivityPlugin } from '@proj-airi/stage-ui/libs/voice/voice-activity-plugin'
-import { CONFIDENCE_THRESHOLD_DISABLED, useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
+import { CONFIDENCE_THRESHOLD_DISABLED, TRANSCRIPTION_LANGUAGE_AUTO, useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useProviderConfigStore } from '@proj-airi/stage-ui/stores/providers/config'
 import { useProviderStore } from '@proj-airi/stage-ui/stores/providers/provider'
 import { useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { SileroVad } from '@proj-airi/stage-ui/workers/vad/silero-vad'
-import { Button, FieldCheckbox, FieldCombobox, FieldInput, FieldRange, SettingsCard } from '@proj-airi/ui'
+import { Button, FieldCheckbox, FieldCombobox, FieldInput, FieldRange, FieldSelect, SettingsCard } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -33,6 +33,7 @@ const {
   transcriptionModelSearchQuery,
   activeCustomModelName,
   confidenceThreshold,
+  transcriptionLanguage,
   verboseJsonNotSupported,
 } = storeToRefs(hearingStore)
 const providersStore = useProviderStore()
@@ -83,6 +84,27 @@ const sortedProviderModels = computed(() => {
 function formatVADThreshold(value: number) {
   return value.toFixed(2)
 }
+
+/**
+ * Whisper-style APIs take an ISO-639-1 code. Each option names its language in that language, so no translation
+ * can rename another language.
+ */
+const spokenLanguageOptions = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'es', label: 'Español' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'pt', label: 'Português' },
+  { value: 'it', label: 'Italiano' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'th', label: 'ไทย' },
+  { value: 'id', label: 'Bahasa Indonesia' },
+  { value: 'ar', label: 'العربية' },
+]
 
 const isSpeechProb = shallowRef(0)
 const isSpeechHistory = shallowRef<number[]>([])
@@ -506,6 +528,22 @@ onUnmounted(() => {
               />
             </template>
           </div>
+        </div>
+
+        <!-- Spoken language. A hint helps providers that would otherwise guess, and it never comes from the OS. -->
+        <div :class="['border-t border-neutral-200 pt-4 dark:border-neutral-700']">
+          <FieldSelect
+            v-model="transcriptionLanguage"
+            data-testid="hearing-transcription-language"
+            :label="t('settings.pages.modules.hearing.sections.section.transcription-language.label')"
+            :description="t('settings.pages.modules.hearing.sections.section.transcription-language.description')"
+            :options="[
+              { value: TRANSCRIPTION_LANGUAGE_AUTO, label: t('settings.pages.modules.hearing.sections.section.transcription-language.auto') },
+              ...spokenLanguageOptions,
+            ]"
+            :placeholder="t('settings.pages.modules.hearing.sections.section.transcription-language.placeholder')"
+            layout="vertical"
+          />
         </div>
 
         <!-- Confidence threshold (only for non-streaming providers) -->

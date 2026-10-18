@@ -81,6 +81,8 @@ interface HearingTranscriptionInvokeOptions {
 }
 
 export const CONFIDENCE_THRESHOLD_DISABLED = -3
+/** The stored value that asks the provider to detect the spoken language from the recording. */
+export const TRANSCRIPTION_LANGUAGE_AUTO = 'auto'
 
 export function filterTranscriptionByConfidence(
   segments: Array<{ text?: string, avg_logprob?: number }>,
@@ -254,26 +256,30 @@ export function resolveActiveTranscriptionModel(activeModel: string, providerCon
 }
 
 /**
- * Resolves extra transcription request options from provider config and UI locale.
+ * Resolves extra transcription request options from the provider config and the Hearing language.
  *
  * Use when:
  * - Short ASR recordings need a language hint to avoid multilingual auto-detection drift.
  * - Provider-specific transcription prompts are configured outside the Hearing active model field.
  *
  * Expects:
- * - `uiLocale` uses a BCP-47-like language tag such as `zh-Hans` or `en-US`.
+ * - `language` is the language that the user chose in Hearing, such as `zh`. Absent or `auto` means auto detection.
  *
  * Returns:
  * - OpenAI-compatible transcription options that can be merged into the provider request.
+ *   Without a chosen language, no hint is sent and the provider detects the language itself.
+ *   A device locale is never a hint: the microphone hears the user, not the system.
  */
-export function resolveTranscriptionProviderOptions(providerConfig?: Record<string, unknown>, uiLocale = globalThis.navigator?.language ?? '') {
+export function resolveTranscriptionProviderOptions(providerConfig?: Record<string, unknown>, language = TRANSCRIPTION_LANGUAGE_AUTO) {
   const configuredLanguage = typeof providerConfig?.language === 'string' ? providerConfig.language.trim() : ''
-  const localeLanguage = uiLocale.split(/[-_]/)[0]?.trim().toLowerCase() ?? ''
-  const language = configuredLanguage || localeLanguage
+  const chosenLanguage = language.trim().toLowerCase()
+  const chosen = chosenLanguage === TRANSCRIPTION_LANGUAGE_AUTO ? '' : chosenLanguage
+  // An explicit choice wins, so one global control applies to every provider, including one with its own language field.
+  const resolved = chosen || configuredLanguage
   const prompt = typeof providerConfig?.prompt === 'string' ? providerConfig.prompt.trim() : ''
 
   return {
-    ...(language ? { language } : {}),
+    ...(resolved ? { language: resolved } : {}),
     ...(prompt ? { prompt } : {}),
   }
 }
@@ -334,6 +340,9 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const autoSendEnabled = useLocalStorageManualReset<boolean>('settings/hearing/auto-send-enabled', false, persistenceOptions)
   const autoSendDelay = useLocalStorageManualReset<number>('settings/hearing/auto-send-delay', 2000, persistenceOptions) // Default 2 seconds
   const confidenceThreshold = useLocalStorageManualReset<number>('settings/hearing/confidence-threshold', CONFIDENCE_THRESHOLD_DISABLED, persistenceOptions)
+  // `auto` lets the provider detect the spoken language. A device locale is never a substitute: a user can speak
+  // Chinese while the system runs in English.
+  const transcriptionLanguage = useLocalStorageManualReset('settings/hearing/transcription-language', TRANSCRIPTION_LANGUAGE_AUTO, persistenceOptions)
   // Rephrasing sends transcripts to a chat model. Voice input already sends them to that model, so it is on by default.
   const rephraseEnabled = useLocalStorageManualReset<boolean>('settings/hearing/rephrase-enabled', true, persistenceOptions)
   // A chat model reads paused transcripts and ends finished messages before the silence limit.
@@ -415,6 +424,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     autoSendEnabled.reset()
     autoSendDelay.reset()
     confidenceThreshold.reset()
+    transcriptionLanguage.reset()
     rephraseEnabled.reset()
     endJudgeEnabled.reset()
     speakerRecognitionEnabled.reset()
@@ -564,7 +574,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     const config = structuredClone(toRaw(providerStore.getProviderConfig(providerId) ?? {}))
     const model = resolveActiveTranscriptionModel(activeTranscriptionModel.value, config)
     const threshold = confidenceThreshold.value
-    const providerOptions = resolveTranscriptionProviderOptions(config)
+    const providerOptions = resolveTranscriptionProviderOptions(config, transcriptionLanguage.value)
     const features = providersStore.getTranscriptionFeatures(providerId)
     const definition = providersStore.getProviderDefinition(providerId)
     // The provider decides its upload format. Every format starts from the same captured PCM stream.
@@ -637,6 +647,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     autoSendEnabled,
     autoSendDelay,
     confidenceThreshold,
+    transcriptionLanguage,
     rephraseEnabled,
     endJudgeEnabled,
     speakerRecognitionEnabled,

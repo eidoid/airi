@@ -932,6 +932,11 @@ pages:
             description: Select the microphone that AIRI uses.
             playground-description: Hearing and the playground use this microphone.
             placeholder: Select a microphone
+          transcription-language:
+            label: Spoken language
+            description: The language that you speak to AIRI. Auto detection reads it from each recording, not from the system language.
+            auto: Detect automatically
+            placeholder: Select a language
           auto-send:
             title: Transcripts
             description: Choose what AIRI does with the text of your speech.

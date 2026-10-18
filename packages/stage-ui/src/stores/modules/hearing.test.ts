@@ -9,6 +9,7 @@ import {
   resolveStreamTranscriptionExecutor,
   resolveTranscriptionFileName,
   resolveTranscriptionProviderOptions,
+  TRANSCRIPTION_LANGUAGE_AUTO,
 } from './hearing'
 
 describe('filterTranscriptionByConfidence', () => {
@@ -90,18 +91,35 @@ describe('resolveActiveTranscriptionModel', () => {
 describe('resolveTranscriptionProviderOptions', () => {
   /**
    * @example
-   * resolveTranscriptionProviderOptions({}, 'zh-Hans')
+   * resolveTranscriptionProviderOptions({}, 'zh')
    */
-  it('derives a two-letter transcription language from the active UI locale', () => {
-    expect(resolveTranscriptionProviderOptions({}, 'zh-Hans')).toEqual({ language: 'zh' })
+  it('sends the chosen spoken language', () => {
+    expect(resolveTranscriptionProviderOptions({}, 'zh')).toEqual({ language: 'zh' })
   })
 
   /**
    * @example
-   * resolveTranscriptionProviderOptions({ language: 'ja' }, 'zh-Hans')
+   * resolveTranscriptionProviderOptions({}, TRANSCRIPTION_LANGUAGE_AUTO)
    */
-  it('prefers the provider language when one is configured explicitly', () => {
-    expect(resolveTranscriptionProviderOptions({ language: 'ja' }, 'zh-Hans')).toEqual({ language: 'ja' })
+  it('sends no hint so the provider detects the language', () => {
+    expect(resolveTranscriptionProviderOptions({})).toEqual({})
+    expect(resolveTranscriptionProviderOptions({}, TRANSCRIPTION_LANGUAGE_AUTO)).toEqual({})
+  })
+
+  /**
+   * @example
+   * resolveTranscriptionProviderOptions({ language: 'ja' }, TRANSCRIPTION_LANGUAGE_AUTO)
+   */
+  it('uses the provider language when the user chose none', () => {
+    expect(resolveTranscriptionProviderOptions({ language: 'ja' })).toEqual({ language: 'ja' })
+  })
+
+  /**
+   * @example
+   * resolveTranscriptionProviderOptions({ language: 'ja' }, 'zh')
+   */
+  it('prefers the language that the user chose in Hearing', () => {
+    expect(resolveTranscriptionProviderOptions({ language: 'ja' }, 'zh')).toEqual({ language: 'zh' })
   })
 })
 

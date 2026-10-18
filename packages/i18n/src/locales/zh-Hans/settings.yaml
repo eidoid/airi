@@ -890,6 +890,11 @@ pages:
             description: 选择 AIRI 使用的麦克风。
             playground-description: 听觉和测试区都使用这个麦克风。
             placeholder: 选择麦克风
+          transcription-language:
+            label: 说话语言
+            description: 你对 AIRI 说话时使用的语言。自动检测会从每段录音判断，不使用系统语言。
+            auto: 自动检测
+            placeholder: 选择语言
           auto-send:
             title: 转写文本
             description: 选择 AIRI 如何处理识别出的文字。
