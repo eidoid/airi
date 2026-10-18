@@ -430,6 +430,10 @@ watch(() => voice.activeTurns, (turns) => {
     speechVoicing.value = false
 })
 
+// A proactive line waits while this host still speaks a turn or holds one that waits for its audio.
+// `chatStore.sending` already clears when the model finishes, so the store cannot see this by itself.
+const disconnectSpeakingGate = proactiveSpeechStore.connectSpeakingGate(() => nowSpeaking.value || voice.activeTurns.length > 0)
+
 const cards = useAiriCardStore()
 const disconnectVoiceOutput = voice.connectOutput((turn) => {
   const output = {
@@ -676,7 +680,9 @@ onUnmounted(() => {
   chatHookCleanups.forEach(dispose => dispose?.())
   viewUpdateCleanups.forEach(dispose => dispose?.())
   disconnectVoiceOutput()
+  disconnectSpeakingGate()
   releaseSpeechPlayerRole()
+  speechAnalysis.disconnect()
   speechDestination.disconnect()
 })
 
