@@ -13,7 +13,7 @@ import { electronOpenDevtoolsWindow, electronOpenEditor, electronOpenMainDevtool
 
 const { t } = useI18n()
 const settings = useSettings()
-const { showToolPayloadsAsJson } = storeToRefs(useSettingsDeveloper())
+const { showToolPayloadsAsJson, stageDiagnostics } = storeToRefs(useSettingsDeveloper())
 const router = useRouter()
 const eventaContext = useElectronEventaContext()
 const getIOTraceRecording = useElectronEventaInvoke(ioTraceRecordingGet)
@@ -235,6 +235,15 @@ const openEditor = useElectronEventaInvoke(electronOpenEditor)
   >
     {{ t('tamagotchi.settings.devtools.pages.lag-visualizer.title') }}
   </ButtonBar>
+  <CheckBar
+    v-model="stageDiagnostics"
+    :class="['mb-2', 'transition-all duration-250 ease-in-out']"
+    icon-on="i-solar:heart-pulse-bold-duotone"
+    icon-off="i-solar:heart-pulse-linear"
+    text="tamagotchi.settings.devtools.pages.stage-diagnostics.title"
+    description="tamagotchi.settings.devtools.pages.stage-diagnostics.description"
+    transition="all ease-in-out duration-250"
+  />
   <CheckBar
     v-model="settings.disableTransitions"
     :class="['mb-2', 'transition-all duration-250 ease-in-out']"
