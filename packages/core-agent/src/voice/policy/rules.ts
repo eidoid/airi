@@ -35,6 +35,11 @@ export interface SpeechActivityRuleOptions {
   readonly minSpeechMs?: number
   /** This much silence ends an input that this rule began. A function is read on each window. @default 1200 */
   readonly silenceMs?: number | (() => number)
+  /**
+   * The longest audio that one input keeps open, in milliseconds of captured windows.
+   * The input seals and keeps its words when it reaches this limit. @default 30000
+   */
+  readonly maxInputMs?: number
   /** @default 360. Speech onset keeps this much audio before the detected window. */
   readonly preRollMs?: number
   /** The session and turns for speech without a wake word. Undefined starts no input, for example in wake word mode. */
@@ -56,6 +61,8 @@ interface OwnedInput {
   readonly sessionId: string
   readonly speechMs: number
   readonly silenceMs: number
+  /** Every counted window, including silence. It bounds an input that never sees enough silence. */
+  readonly capturedMs: number
   /** The end frame of the last counted window. Undefined until the first frame of the input is known. */
   readonly activityEnd?: number
   /**
@@ -103,7 +110,7 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
           return { state: { active } }
 
         // The rule began this input. A speech onset includes its first window, so that window counts now.
-        const owned: OwnedInput = { inputId, sessionId, speechMs: 0, silenceMs: 0, activityEnd: from?.frame, waiting: [] }
+        const owned: OwnedInput = { inputId, sessionId, speechMs: 0, silenceMs: 0, capturedMs: 0, activityEnd: from?.frame, waiting: [] }
         if (!from)
           return { state: { active, owned } }
         const counted = count(owned, from, [beginning.firstWindow])
@@ -184,7 +191,16 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
         continue
 
       emit.push(emission(inputActivitySignal, { inputId: owned.inputId, range, speech, durationMs }))
-      owned = { ...owned, speechMs: owned.speechMs + (speech ? durationMs : 0), silenceMs: speech ? 0 : owned.silenceMs + durationMs, activityEnd: range.endFrame }
+      owned = {
+        ...owned,
+        speechMs: owned.speechMs + (speech ? durationMs : 0),
+        silenceMs: speech ? 0 : owned.silenceMs + durationMs,
+        capturedMs: owned.capturedMs + durationMs,
+        activityEnd: range.endFrame,
+      }
+      if (owned.capturedMs >= (options.maxInputMs ?? 30_000)) {
+        return { owned: undefined, emit, commands: [{ type: 'seal', inputId: owned.inputId, at: { sourceId: range.sourceId, frame: range.endFrame } }] }
+      }
       const limit = typeof options.silenceMs === 'function' ? options.silenceMs() : options.silenceMs ?? 1200
       if (owned.silenceMs < limit)
         continue

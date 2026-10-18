@@ -1,7 +1,5 @@
 import type { KeywordEntry, KeywordSpotter, KWSModelPack } from '@sherpaw/kws'
 
-import { errorMessageFrom } from '@moeru/std'
-
 import modelTokens from './kws-vocabulary.json'
 
 import { fetchSherpawModelPack } from '../providers/providers/sherpaw/model-assets'
@@ -83,24 +81,14 @@ function withinStep<T>(step: string, work: Promise<T>): Promise<T> {
  * Each step has its own budget, so a stuck step names itself in the status that the stage shows.
  */
 export async function createKwsSpotter(keywords: readonly KeywordEntry[]): Promise<KeywordSpotter> {
-  console.info('[wake-word] prepare start', keywords.length, 'keywords')
   const [model, { createKeywordSpotter }, { default: KwsWorker }] = await Promise.all([
     withinStep('model files', loadKwsModel()),
     withinStep('runtime', import('@sherpaw/kws')),
     withinStep('worker chunk', import('@sherpaw/kws/worker?worker')),
   ])
-  console.info('[wake-word] model and runtime loaded, starting worker')
 
-  try {
-    const spotter = await withinStep(
-      'worker start',
-      createKeywordSpotter({ model, keywords, maxActivePaths: kwsSearch.maxActivePaths }, { worker: new KwsWorker() }),
-    )
-    console.info('[wake-word] worker ready')
-    return spotter
-  }
-  catch (error) {
-    console.info('[wake-word] worker start failed:', errorMessageFrom(error) ?? 'unknown')
-    throw error
-  }
+  return withinStep(
+    'worker start',
+    createKeywordSpotter({ model, keywords, maxActivePaths: kwsSearch.maxActivePaths }, { worker: new KwsWorker() }),
+  )
 }
