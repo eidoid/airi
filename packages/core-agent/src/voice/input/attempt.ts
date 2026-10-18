@@ -14,6 +14,9 @@ import { nanoid } from 'nanoid/non-secure'
 import { errorFromCause } from '../../utils/error'
 import { SpeechInput } from './speech-input'
 
+/** How long admission waits for silence and for the first block when the caller sets no budget. */
+const DEFAULT_ADMISSION_TIMEOUT_MS = 20_000
+
 interface InputPluginLifetime {
   finish: () => Promise<void>
   close: (outcome: Awaited<SpeechSubscription['done']>) => Promise<void>
@@ -250,7 +253,7 @@ export class SpeechInputAttempt {
     if (interruption) {
       this.change({ phase: 'pending', waitingFor: 'silence' })
       this.stage = 'admission'
-      const receipts = await interruption.silenced
+      const receipts = await this.withinAdmission(interruption.silenced, 'Playback did not become silent')
       const failed = receipts.find(receipt => receipt.status === 'failed')
       if (failed)
         throw failed.error ?? new Error('Playback silence was not confirmed')
@@ -261,13 +264,34 @@ export class SpeechInputAttempt {
     reserved ??= this.prepareCapture(audio)
     this.stage = 'source'
     this.change({ phase: 'pending', waitingFor: 'source' })
-    await Promise.race([reserved.capture.started, reserved.capture.done])
+    await this.withinAdmission(Promise.race([reserved.capture.started, reserved.capture.done]), 'The microphone delivered no audio')
     if (this.abort.signal.aborted || this.current.phase === 'settled')
       return
 
     // A live capture starts at the first block it receives, so its start position is known only now.
     this.from ??= audio.position && { sourceId: audio.position.sourceId, frame: this.activityEnd }
     return reserved
+  }
+
+  /**
+   * Bounds one admission wait. A source that never delivers audio, or playback that never turns silent, would
+   * otherwise hold this attempt as `pending` forever, and every later automatic input yields to the active input.
+   */
+  private async withinAdmission<T>(wait: Promise<T>, reason: string): Promise<T> {
+    const timeoutMs = this.owner.options.admissionTimeoutMs ?? DEFAULT_ADMISSION_TIMEOUT_MS
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+      throw new Error('Admission timeout must be finite and positive')
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${reason} within ${timeoutMs} ms`)), timeoutMs)
+      wait.then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      }, (cause) => {
+        clearTimeout(timer)
+        reject(cause)
+      })
+    })
   }
 
   private async readTranscription(provider: StreamingTranscriber, capture: Capture): Promise<boolean> {
