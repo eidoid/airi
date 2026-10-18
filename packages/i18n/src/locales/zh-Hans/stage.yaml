@@ -300,6 +300,8 @@ status:
   paused: AIRI 说话时暂停聆听
   transcribing: 正在转写
   hearing-error: 语音转写出错了
+  wake-word-error: 唤醒词检测失败
+  wake-word-unconfigured: 没有角色设置唤醒词，只能手动开始输入
   no-transcript: 识别到的内容会显示在这里。
   signing-in: 请在浏览器中完成登录
   confirming: 正在确认登录

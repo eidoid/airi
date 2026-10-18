@@ -13,17 +13,30 @@ defineProps<{ align?: 'start' | 'center' }>()
 
 const { t } = useI18n()
 const { error, snapshot } = storeToRefs(useVoiceControlsStore())
+const { configured, inputMode } = storeToRefs(useHearingStore())
 const enabled = computed(() => snapshot.value.microphone?.enabled ?? false)
 const ready = computed(() => snapshot.value.microphone?.ready ?? false)
 const microphoneError = computed(() => snapshot.value.microphone?.error)
+/** A wake word mode that cannot wake is the reason that nothing starts, so it must not look like plain listening. */
+const wakeIssue = computed(() => {
+  if (!enabled.value || inputMode.value !== 'wake-word')
+    return undefined
+  const wake = snapshot.value.wakeWords
+  if (wake?.preparation === 'error')
+    return [t('stage.status.wake-word-error'), wake.error].filter(Boolean).join(': ')
+  if (wake?.preparation === 'unconfigured')
+    return t('stage.status.wake-word-unconfigured')
+  return undefined
+})
 const transcript = computed(() => snapshot.value.input?.text)
 const isTranscribing = computed(() => snapshot.value.input?.phase === 'finalizing')
 const { volumeLevel } = useAudioAnalyzer()
-const { configured } = storeToRefs(useHearingStore())
 const issue = computed(() => {
   // Device failure prevents all input, so it takes precedence over provider feedback.
   if (microphoneError.value)
     return microphoneError.value
+  if (wakeIssue.value)
+    return wakeIssue.value
   if (error.value)
     return error.value
   if (enabled.value && !configured.value)

@@ -310,6 +310,8 @@ status:
   paused: Listening paused while AIRI speaks
   transcribing: Transcribing
   hearing-error: Could not transcribe audio
+  wake-word-error: Wake word detection failed
+  wake-word-unconfigured: No character has wake words, so only a manual input starts
   no-transcript: Recognized speech will appear here.
   signing-in: Finish signing in in your browser
   confirming: Confirming sign-in
