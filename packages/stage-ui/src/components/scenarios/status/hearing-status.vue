@@ -39,6 +39,10 @@ const wakeSummary = computed(() => {
 const preparingWake = computed(() => inputMode.value === 'wake-word' && snapshot.value.wakeWords?.preparation === 'preparing')
 const transcript = computed(() => snapshot.value.input?.text)
 const isTranscribing = computed(() => snapshot.value.input?.phase === 'finalizing')
+const isWakeActive = computed(() => {
+  const input = snapshot.value.input
+  return input?.trigger === 'wake-word' && (input.phase === 'pending' || input.phase === 'capturing')
+})
 const { volumeLevel } = useAudioAnalyzer()
 const issue = computed(() => {
   // Device failure prevents all input, so it takes precedence over provider feedback.
@@ -57,13 +61,25 @@ const state = computed(() => {
     return 'error'
   if (preparingWake.value)
     return 'busy'
-  if (isTranscribing.value || (enabled.value && !ready.value))
+  if (isTranscribing.value)
+    return 'transcribing'
+  if (isWakeActive.value)
+    return 'wake'
+  if (enabled.value && !ready.value)
     return 'busy'
   if (enabled.value)
     return 'listening'
   return 'idle'
 })
-const amplitude = computed(() => state.value === 'listening' && ready.value ? Math.min(1, Math.max(0, volumeLevel.value / 100)) : 0)
+const tone = computed(() => {
+  switch (state.value) {
+    case 'wake': return 'wake'
+    case 'transcribing': return 'transcribing'
+    case 'error': return 'error'
+    default: return 'neutral'
+  }
+})
+const amplitude = computed(() => (state.value === 'listening' || state.value === 'wake') && ready.value ? Math.min(1, Math.max(0, volumeLevel.value / 100)) : 0)
 const label = computed(() => {
   if (issue.value)
     return t('stage.status.hearing-error')
@@ -79,10 +95,10 @@ const label = computed(() => {
 
 <template>
   <StatusCapsule
-    v-if="enabled || issue || isTranscribing"
+    v-if="enabled || issue || isWakeActive || isTranscribing"
     :align="align"
     :data-status="state"
-    :tone="issue ? 'error' : 'neutral'"
+    :tone="tone"
     :label="label"
     :details="issue || transcript || wakeSummary || t('stage.status.no-transcript')"
   >

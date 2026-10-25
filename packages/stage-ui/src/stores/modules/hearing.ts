@@ -347,6 +347,8 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const rephraseEnabled = useLocalStorageManualReset<boolean>('settings/hearing/rephrase-enabled', true, persistenceOptions)
   // A chat model reads paused transcripts and ends finished messages before the silence limit.
   const endJudgeEnabled = useLocalStorageManualReset<boolean>('settings/hearing/end-judge-enabled', true, persistenceOptions)
+  // The end judge can let a speaker continue after a pause. This wait is the hard limit after that pause.
+  const endJudgeWaitMs = useLocalStorageManualReset<number>('settings/hearing/end-judge-wait', 3000, persistenceOptions)
   // Speaker recognition compares each voice input with the saved voiceprint and traces the score. It changes no input.
   const speakerRecognitionEnabled = useLocalStorageManualReset<boolean>('settings/hearing/speaker-recognition-enabled', false, persistenceOptions)
   // An empty provider uses the chat model of the consciousness module.
@@ -427,6 +429,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     transcriptionLanguage.reset()
     rephraseEnabled.reset()
     endJudgeEnabled.reset()
+    endJudgeWaitMs.reset()
     speakerRecognitionEnabled.reset()
     rephraseProvider.reset()
     rephraseModel.reset()
@@ -650,6 +653,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     transcriptionLanguage,
     rephraseEnabled,
     endJudgeEnabled,
+    endJudgeWaitMs,
     speakerRecognitionEnabled,
     rephraseProvider,
     rephraseModel,

@@ -81,13 +81,16 @@ The Hearing store keeps `inputMode`. The microphone switch (`useSettingsAudioDev
 
 `startsInputOnSpeech(mode)` decides if VAD alone starts an input. In `wake-word` mode, the voice store's speech target is undefined.
 Wake word detection runs in every mode that listens continuously. In `always-on` mode, a wake also moves the input to the matched character's session.
+An explicit wake bypasses echo rejection and starts capture while it interrupts the current turn, so speech during the fade is kept.
+After a 1.2 second pause, the end judge can end a finished message. `endJudgeWaitMs` sets the extra wait for an unfinished message and defaults to 3 seconds.
 The voice host publishes the detector preparation in its snapshot as `wakeWords`, so a settings window can show it.
 
 Each stage page calls `useVoiceListening` once. It is the one place that starts or stops continuous listening.
 `listensContinuously(mode)` in `stores/modules/hearing.ts` decides which modes run detection and keep the microphone open.
 To add a mode, extend `HearingInputMode`, `listensContinuously`, `startsInputOnSpeech`, and `useVoiceListening`.
 Silero VAD scores each window in a worker (`workers/vad/silero-vad.worker.ts`), because inference at 31 windows per second must not share the window's thread with rendering.
-A failed worker rejects every later window, so a broken detector fails the observation and reaches the status capsule instead of passing for silence.
+A failed worker rejects its pending windows. The next window replaces that worker, so a temporary detector failure cannot leave listening permanently stopped.
+A watchdog replaces a worker that gives no answer within 10 seconds.
 `useStageDiagnostics` samples the frame rate, the heap, and this voice state every five seconds while the developer setting is on.
 It keeps the newest twenty minutes in `localStorage` under `diagnostics/stage-samples`, so a slow window or a silent microphone can be read after a restart.
 
@@ -316,6 +319,7 @@ its waiting and result icons. The shell has no request or microphone state. Its 
 stay inside its layout bounds so Electron can include them in mouse hit testing.
 `HearingStatus` uses the details slot to match chat error cards without adding
 microphone failures to chat history.
+It uses a pale green surface for a wake-started input and a pale violet surface while that input finalizes.
 The component supports reduced motion. Desktop users can enable Streamer mode in
 General settings to hide these overlays without stopping microphone input or sign-in.
 Streamer mode is off by default.

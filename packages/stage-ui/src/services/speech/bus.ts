@@ -84,6 +84,9 @@ export interface VoiceDraft {
   readonly sending?: boolean
 }
 
+/** What started a speech input. The status surfaces use it to distinguish a wake from other input. */
+export type VoiceInputTrigger = 'control' | 'speech' | 'wake-word'
+
 /** A snapshot replaces earlier presentation state. Commands still target the original request or draft identity. */
 export interface VoiceHostSnapshot {
   readonly connected: boolean
@@ -93,6 +96,8 @@ export interface VoiceHostSnapshot {
   readonly input?: {
     readonly requestId: string
     readonly sessionId: string
+    /** What started this input. The capsule uses it to distinguish a wake from a manual or voice-activity input. */
+    readonly trigger: VoiceInputTrigger
     readonly phase: 'pending' | 'capturing' | 'finalizing' | 'settled'
     readonly text: string
     /** Corrected transcript segments in spoken order. A segment that is not final can still change. */

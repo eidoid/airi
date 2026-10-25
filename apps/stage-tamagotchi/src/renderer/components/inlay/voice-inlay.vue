@@ -20,6 +20,7 @@ import { useGlobalEscape } from '../../composables/use-global-escape'
  * - `sent`: the host sends the speech to the chat. The card shows the sent text and moves up out of view.
  */
 type InlayView = 'hidden' | 'capsule' | 'card' | 'sent'
+type CapsuleTone = 'neutral' | 'wake' | 'transcribing'
 
 /**
  * Time without content before a dragged inlay returns to its home position.
@@ -47,6 +48,23 @@ const liveInput = computed(() => {
   const input = controls.snapshot.input
   return input && input.phase !== 'settled' && input.requestId !== dismissed.value.requestId ? input : undefined
 })
+const capsuleTone = computed<CapsuleTone>(() => {
+  if (liveInput.value?.phase === 'finalizing')
+    return 'transcribing'
+  if (liveInput.value?.trigger === 'wake-word')
+    return 'wake'
+  return 'neutral'
+})
+const capsuleTextClass = computed(() => {
+  switch (capsuleTone.value) {
+    case 'wake': return 'text-emerald-800 dark:text-emerald-100'
+    case 'transcribing': return 'text-violet-800 dark:text-violet-100'
+    default: return 'text-neutral-600 dark:text-neutral-300'
+  }
+})
+const capsuleLabel = computed(() => capsuleTone.value === 'transcribing'
+  ? t('stage.status.transcribing')
+  : t('stage.chat.voice-draft.listening'))
 const editableDrafts = computed(() => controls.snapshot.drafts.filter(draft => !draft.sending && !dismissed.value.drafts.has(draftKey(draft))))
 const sendingDraft = computed(() => controls.snapshot.drafts.find(draft => draft.sending))
 
@@ -80,6 +98,15 @@ watch(view, (next, previous) => {
 })
 
 const shown = computed<InlayView>(() => view.value === 'hidden' && sending.value ? 'sent' : view.value)
+const capsuleSurfaceClass = computed(() => {
+  if (shown.value !== 'capsule')
+    return 'bg-white/95 dark:bg-neutral-900/95'
+  switch (capsuleTone.value) {
+    case 'wake': return 'bg-emerald-100/90 dark:bg-emerald-950/75'
+    case 'transcribing': return 'bg-violet-100/90 dark:bg-violet-950/75'
+    default: return 'bg-white/95 dark:bg-neutral-900/95'
+  }
+})
 
 // Speech or a draft keeps the inlay where the user dragged it. Only an idle inlay returns home.
 const homeTimer = useTimeoutFn(() => void returnHome(), RETURN_HOME_DELAY_MS, { immediate: false })
@@ -144,10 +171,11 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
         v-if="shown !== 'hidden'"
         data-testid="voice-inlay"
         :data-view="shown"
+        :data-tone="shown === 'capsule' ? capsuleTone : undefined"
         :class="[
           'overflow-hidden shadow-lg',
-          'bg-white/95 dark:bg-neutral-900/95',
-          'transition-[width,height,border-radius] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
+          capsuleSurfaceClass,
+          'transition-[width,height,border-radius,background-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
           shown === 'capsule' ? 'h-11 w-44 rounded-full' : 'h-40 w-full max-w-110 rounded-3xl',
           shown === 'sent' ? 'inlay-send' : '',
         ]"
@@ -156,18 +184,18 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
         <div
           v-if="shown === 'capsule'"
           role="status"
-          :class="['drag-region h-full w-full flex items-center gap-2.5 px-4', 'text-sm text-neutral-600 dark:text-neutral-300']"
+          :class="['drag-region h-full w-full flex items-center gap-2.5 px-4', 'text-sm', capsuleTextClass]"
         >
           <span aria-hidden="true" :class="['h-4 flex shrink-0 items-center gap-0.5']">
             <span
               v-for="(factor, index) in LEVEL_BARS"
               :key="index"
-              :class="['w-0.75 rounded-full bg-primary-500', 'transition-[height] duration-100 motion-reduce:transition-none']"
+              :class="['w-0.75 rounded-full bg-current', 'transition-[height] duration-100 motion-reduce:transition-none']"
               :style="{ height: `${Math.round(25 + 75 * Math.min(1, controls.level * factor * 1.6))}%` }"
             />
           </span>
           <span :class="['min-w-0 truncate']">
-            {{ t('stage.chat.voice-draft.listening') }}<template v-if="characterName"> · {{ characterName }}</template>
+            {{ capsuleLabel }}<template v-if="characterName"> · {{ characterName }}</template>
           </span>
         </div>
         <div

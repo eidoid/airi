@@ -48,7 +48,7 @@ async function mountComposer(behavior: HostBehavior = {}) {
   cleanups.push(defineInvokeHandler(context, voiceInputCommand, (command) => {
     commands.push(command)
     if (command.type === 'begin')
-      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, phase: 'capturing', text: '', segments: [] } })
+      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, trigger: 'control', phase: 'capturing', text: '', segments: [] } })
     if (command.type === 'end')
       return { status: 'accepted', text: behavior.dictation }
     return { status: 'accepted' }

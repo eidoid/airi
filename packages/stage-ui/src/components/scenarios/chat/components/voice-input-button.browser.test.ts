@@ -41,7 +41,7 @@ async function mountButton(options: { afterFinish?: Partial<VoiceMessageSnapshot
   cleanups.push(defineInvokeHandler(context, voiceInputCommand, (command) => {
     commands.push(command)
     if (command.type === 'begin')
-      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, phase: 'capturing', text: 'how are', segments: [] } })
+      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, trigger: 'control', phase: 'capturing', text: 'how are', segments: [] } })
     if (command.type === 'end')
       return { status: 'accepted', text: options.dictation }
     return { status: 'accepted' }

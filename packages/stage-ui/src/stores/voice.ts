@@ -2,7 +2,7 @@ import type { BeginSpeechInput, SpeechInputAttempt, SpeechOutput, SpeechStream, 
 import type { AudioWindow } from '@proj-airi/pipelines-audio'
 
 import type { VoiceActivityOptions } from '../libs/voice/voice-activity-plugin'
-import type { VoiceHostSnapshot } from '../services/speech/bus'
+import type { VoiceHostSnapshot, VoiceInputTrigger } from '../services/speech/bus'
 import type { ChatToolReference } from '../types/chat'
 
 import { defineInvokeHandler } from '@moeru/eventa'
@@ -39,14 +39,8 @@ import { useWakeWordDetectionStore } from './wake-word-detection'
 /** The longest time a chat model rewrite can delay a voice submission. */
 const VOICE_REPHRASE_TIMEOUT_MS = 10_000
 
-/**
- * Silence that ends a speech input.
- *
- * - `pauseMs`: a pause this long can end a finished message. Without the end judge, it is the silence limit.
- * - `graceMs`: with the end judge, the silence limit grows by this much, so a speaker can stop to think.
- *   The judge ends a finished message at the pause, so only an unfinished or unjudged message waits for the grace.
- */
-const VOICE_END_SILENCE = { pauseMs: 1200, graceMs: 3000 } as const
+/** A pause this long can end a finished message. Without the end judge, it is the silence limit. */
+const VOICE_END_JUDGE_PAUSE_MS = 1200
 
 /** Application wiring owns presentation and durable chat adapters. The controller owns voice lifecycles. */
 export const useVoiceStore = defineStore('voice', () => {
@@ -83,7 +77,7 @@ export const useVoiceStore = defineStore('voice', () => {
    * The `end` command returns the text and removes the entry. A settled attempt removes it too.
    */
   const composerInputs = new Map<string, string | undefined>()
-  let presentedInput: { requestId: string, attempt: SpeechInputAttempt } | undefined
+  let presentedInput: { requestId: string, attempt: SpeechInputAttempt, trigger: VoiceInputTrigger } | undefined
 
   const inputTracer = createVoiceInputTracer()
   const { controller, state, snapshot: transcript, error } = useVoiceController({
@@ -125,7 +119,7 @@ export const useVoiceStore = defineStore('voice', () => {
   )
   const { judge } = useVoiceEndJudge()
   controller.use(
-    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled, judge, pauseMs: VOICE_END_SILENCE.pauseMs }),
+    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled, judge, pauseMs: VOICE_END_JUDGE_PAUSE_MS }),
     { grants: ['input-control'], onError: event => report(event.error) },
   )
 
@@ -139,11 +133,11 @@ export const useVoiceStore = defineStore('voice', () => {
    * The cause of the input that begins next. A control sets `control` around its begin call, and the voice activity
    * plugin reports `speech` or `wake-word` right before its begin call. `onInput` runs inside that call and reads it.
    */
-  let beginCause: 'control' | 'speech' | 'wake-word' | undefined
+  let beginCause: VoiceInputTrigger | undefined
 
   controller.onInput((attempt) => {
-    presentedInput = { requestId: attempt.id, attempt }
     const cause = beginCause ?? 'speech'
+    presentedInput = { requestId: attempt.id, attempt, trigger: cause }
     beginCause = undefined
     // Only an input that a wake began takes the wake span, so a wake that started nothing cannot join a later input.
     inputTracer.start(attempt, cause, cause === 'wake-word' ? wakeWordDetection.claimWakeSpan() : undefined)
@@ -164,6 +158,7 @@ export const useVoiceStore = defineStore('voice', () => {
         ? { input: {
             requestId: presentedInput.requestId,
             sessionId: presentedInput.attempt.sessionId,
+            trigger: presentedInput.trigger,
             phase: presentedInput.attempt.state.phase,
             text: transcript.value?.transcript.text ?? '',
             segments: (transcript.value?.transcript.segments ?? []).map(segment => ({ id: segment.id, text: segment.text, final: segment.final })),
@@ -371,7 +366,7 @@ export const useVoiceStore = defineStore('voice', () => {
               if (outcome.status !== 'drafted')
                 composerInputs.delete(attempt.id)
             })
-            presentedInput = { requestId: command.requestId, attempt }
+            presentedInput = { requestId: command.requestId, attempt, trigger: 'control' }
             publishSnapshot()
 
             break
@@ -530,7 +525,7 @@ export const useVoiceStore = defineStore('voice', () => {
       pauseReason: () => voiceMessages.isRecording
         ? 'a voice message is recording'
         : captureLease.held ? 'another window holds the microphone' : undefined,
-      silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_SILENCE.pauseMs + VOICE_END_SILENCE.graceMs : VOICE_END_SILENCE.pauseMs,
+      silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_JUDGE_PAUSE_MS + hearing.endJudgeWaitMs : VOICE_END_JUDGE_PAUSE_MS,
       // Automatic barge-in requires platform echo cancellation or an external echo classifier.
       acceptSpeech: options.acceptSpeech ?? (async () => !speaking.nowSpeaking || devices.source.echoCancellation),
       // Wake word mode returns no target, so VAD alone cannot start an input. A wake supplies its own target.

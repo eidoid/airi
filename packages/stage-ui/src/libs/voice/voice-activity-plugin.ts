@@ -11,7 +11,11 @@ export interface VoiceActivityOptions {
    * reads another input uses it to find pauses.
    */
   readonly detectWakeWord?: (window: AudioWindow, signal: AbortSignal, activity: { speech: boolean, durationMs: number }) => Promise<{ sessionId: string, interruptTurns: readonly TurnRef[] } | undefined>
-  /** Echo rejection runs after detection. Detectors remain active while the assistant speaks. */
+  /**
+   * Echo rejection runs after speech detection.
+   * Wake words bypass it, because a wake is an explicit request to interrupt the assistant.
+   * Detectors remain active while the assistant speaks.
+   */
   readonly acceptSpeech?: (window: AudioWindow, signal: AbortSignal) => Promise<boolean>
   readonly enabled?: () => boolean
   /**
@@ -70,13 +74,17 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
     let silenceMs = 0
     /** The captured duration of the input that this plugin owns. It bounds an input that never sees silence. */
     let capturedMs = 0
+    /** The next speech score starts a fresh model stream, so no state from the previous input can leak into it. */
+    let resetDetection = false
 
     // NOTICE:
     // SileroVad requires 512 samples at 16 kHz, so each window lasts 32 ms.
     // The constraint is in workers/vad/silero-vad.ts.
     // Remove this fixed size when detectors supply their own window requirements.
     scope.observeAudio({ windowMs: 32, hopMs: 32, scheduling: 'ordered', preRollMs: options.preRollMs ?? 360 }, async (ctx) => {
-      const score = await options.detect(ctx.window, ctx.signal)
+      const detectionWindow = resetDetection ? { ...ctx.window, discontinuity: true } : ctx.window
+      resetDetection = false
+      const score = await options.detect(detectionWindow, ctx.signal)
       const duration = (ctx.window.range.endFrame - ctx.window.range.startFrame) * 1000 / ctx.window.sampleRate
       const wake = await options.detectWakeWord?.(ctx.window, ctx.signal, { speech: score >= (options.threshold ?? 0.6), durationMs: duration })
       ctx.signal.throwIfAborted()
@@ -128,11 +136,8 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
         }
       }
       if ((wake && wake.sessionId !== input?.sessionId) || (!input && speech)) {
-        if (options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal)) {
-          if (wake)
-            options.onWakeDropped?.('AIRI is speaking')
+        if (!wake && options.acceptSpeech && !await options.acceptSpeech(ctx.window, ctx.signal))
           return
-        }
 
         ctx.signal.throwIfAborted()
         const target = wake ?? options.target()
@@ -144,7 +149,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
 
         options.beforeBeginInput?.(wake ? 'wake-word' : 'speech')
         const result = ctx.controls.beginInput({ ...target, start: wake
-          ? { kind: 'after-silence' }
+          ? { kind: 'speech-onset', at: { sourceId: ctx.window.range.sourceId, frame: ctx.window.range.endFrame }, preRollMs: 0 }
           : { kind: 'speech-onset', at: { sourceId: ctx.window.range.sourceId, frame: ctx.window.range.startFrame }, preRollMs: options.preRollMs ?? 360 } })
         if (result.status !== 'started') {
           if (wake)
@@ -157,6 +162,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
         capturedMs = 0
         speechMs = 0
         silenceMs = 0
+        resetDetection = true
         options.onInput?.()
       }
 

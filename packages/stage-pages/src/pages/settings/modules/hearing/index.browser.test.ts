@@ -68,6 +68,15 @@ describe('hearing overview', () => {
 
     await expect.element(screen.getByTestId('hearing-wake-word-status')).toHaveTextContent('No character has wake words.')
   })
+
+  it('uses the saved extra wait for the end-of-speech check', async () => {
+    localStorage.setItem('settings/hearing/end-judge-wait', '1000')
+    const screen = await renderHearing(true)
+    const wait = screen.getByTestId('hearing-end-judge-wait')
+
+    await expect.element(wait).toBeVisible()
+    await expect.element(wait).toHaveTextContent('1.0s')
+  })
 })
 
 describe('hearing input mode', () => {

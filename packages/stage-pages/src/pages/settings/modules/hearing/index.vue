@@ -11,7 +11,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const hearingStore = useHearingStore()
-const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
+const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, endJudgeWaitMs, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
 const wakeWords = useWakeWordsStore()
 const voiceprints = useVoiceprintStore()
 
@@ -126,6 +126,17 @@ const pages = computed(() => [
             v-model="endJudgeEnabled"
             :label="t('settings.pages.modules.hearing.sections.section.end-judge.enabled')"
             :description="t('settings.pages.modules.hearing.sections.section.end-judge.enabled-description')"
+          />
+          <FieldRange
+            v-if="endJudgeEnabled"
+            v-model="endJudgeWaitMs"
+            data-testid="hearing-end-judge-wait"
+            :label="t('settings.pages.modules.hearing.sections.section.end-judge.wait')"
+            :description="t('settings.pages.modules.hearing.sections.section.end-judge.wait-description')"
+            :min="0"
+            :max="5000"
+            :step="100"
+            :format-value="value => `${(value / 1000).toFixed(1)}s`"
           />
         </div>
 

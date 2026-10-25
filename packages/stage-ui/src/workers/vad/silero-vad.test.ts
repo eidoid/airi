@@ -39,16 +39,22 @@ function windowOf(fill: number, channels = 1): AudioWindow {
   }
 }
 
-function createVad() {
-  const fake = createFakeWorker()
-  const vad = new SileroVad(() => fake.worker)
-  return { ...fake, vad }
+function createVad(options?: ConstructorParameters<typeof SileroVad>[1]) {
+  const fakes: ReturnType<typeof createFakeWorker>[] = []
+  const createWorker = vi.fn(() => {
+    const fake = createFakeWorker()
+    fakes.push(fake)
+    return fake.worker
+  })
+  const vad = new SileroVad(createWorker, options)
+  return { createWorker, fakes, vad }
 }
 
 describe('sileroVad', () => {
   it('sends one mono window with its id and resolves with the score of that id', async () => {
-    const { worker, answer, vad } = createVad()
+    const { fakes, vad } = createVad()
     const pending = vad.score(windowOf(0.5, 2), new AbortController().signal)
+    const { worker, answer } = fakes[0]!
 
     expect(worker.postMessage).toHaveBeenCalledOnce()
     const [request, transfer] = worker.postMessage.mock.calls[0]
@@ -63,18 +69,19 @@ describe('sileroVad', () => {
   })
 
   it('rejects a window that the model cannot read', async () => {
-    const { worker, vad } = createVad()
+    const { createWorker, vad } = createVad()
     const wrongSize = { ...windowOf(0), channels: [new Float32Array(256)] }
 
     await expect(vad.score(wrongSize, new AbortController().signal)).rejects.toThrow('512 samples')
-    expect(worker.postMessage).not.toHaveBeenCalled()
+    expect(createWorker).not.toHaveBeenCalled()
     await vad.close()
   })
 
   it('rejects a pending window when the caller aborts and drops its late answer', async () => {
-    const { answer, vad } = createVad()
+    const { fakes, vad } = createVad()
     const abort = new AbortController()
     const pending = vad.score(windowOf(0), abort.signal)
+    const { answer } = fakes[0]!
 
     abort.abort('Voice pipeline closed')
     await expect(pending).rejects.toThrow('Voice pipeline closed')
@@ -84,22 +91,58 @@ describe('sileroVad', () => {
     await vad.close()
   })
 
-  it('rejects every window after the worker failed', async () => {
-    const { fail, vad } = createVad()
+  it('replaces the worker after an error so speech detection can recover', async () => {
+    const { createWorker, fakes, vad } = createVad()
     const pending = vad.score(windowOf(0), new AbortController().signal)
 
-    fail(new Error('model unavailable'))
+    fakes[0]!.fail(new Error('model unavailable'))
     await expect(pending).rejects.toThrow('model unavailable')
-    await expect(vad.score(windowOf(0), new AbortController().signal)).rejects.toThrow('Speech detection failed: model unavailable')
+    expect(fakes[0]!.worker.terminate).toHaveBeenCalledOnce()
+
+    const recovered = vad.score(windowOf(0), new AbortController().signal)
+    expect(createWorker).toHaveBeenCalledTimes(2)
+    fakes[1]!.answer({ type: 'score', id: 1, score: 0.8 })
+    await expect(recovered).resolves.toBe(0.8)
+    await vad.close()
+  })
+
+  it('replaces the worker after a failed score response', async () => {
+    const { createWorker, fakes, vad } = createVad()
+    const pending = vad.score(windowOf(0), new AbortController().signal)
+
+    fakes[0]!.answer({ type: 'failed', id: 0, message: 'inference failed' })
+    await expect(pending).rejects.toThrow('inference failed')
+    expect(fakes[0]!.worker.terminate).toHaveBeenCalledOnce()
+
+    const recovered = vad.score(windowOf(1), new AbortController().signal)
+    expect(createWorker).toHaveBeenCalledTimes(2)
+    fakes[1]!.answer({ type: 'score', id: 1, score: 0.9 })
+    await expect(recovered).resolves.toBe(0.9)
+    await vad.close()
+  })
+
+  it('replaces a worker that stops answering', async () => {
+    const { createWorker, fakes, vad } = createVad({ requestTimeoutMs: 20 })
+    const pending = vad.score(windowOf(0), new AbortController().signal)
+
+    await expect(pending).rejects.toThrow('Speech detection timed out')
+    expect(fakes[0]!.worker.terminate).toHaveBeenCalledOnce()
+
+    const recovered = vad.score(windowOf(1), new AbortController().signal)
+    expect(createWorker).toHaveBeenCalledTimes(2)
+    fakes[1]!.answer({ type: 'score', id: 1, score: 0.7 })
+    await expect(recovered).resolves.toBe(0.7)
     await vad.close()
   })
 
   it('stops the worker and rejects later windows once closed', async () => {
-    const { worker, vad } = createVad()
+    const { fakes, vad } = createVad()
+    const pending = vad.score(windowOf(0), new AbortController().signal)
 
     await vad.close()
 
-    expect(worker.terminate).toHaveBeenCalledOnce()
+    expect(fakes[0]!.worker.terminate).toHaveBeenCalledOnce()
+    await expect(pending).rejects.toThrow('closed')
     await expect(vad.score(windowOf(0), new AbortController().signal)).rejects.toThrow('closed')
   })
 })

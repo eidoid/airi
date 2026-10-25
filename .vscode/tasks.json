@@ -1,0 +1,46 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "AIRI: Start and wait for debuggers",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "lock=${TMPDIR:-/tmp}/airi-debug-start.lock; exec 9>\"$lock\"; if command -v flock >/dev/null 2>&1; then flock 9; fi; if curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9229/json >/dev/null 2>&1; then echo \"AIRI debuggers already ready\"; exit 0; fi; if command -v docker >/dev/null 2>&1; then docker start airi-dev >/dev/null 2>&1 || true; if ! docker exec airi-dev pgrep -f \"[e]lectron-vite\" >/dev/null 2>&1; then docker exec -d airi-dev setsid -f sh -c \"exec airi-debug >/tmp/airi-debug.log 2>&1\"; fi; else if pgrep -f \"[e]lectron-vite\" >/dev/null 2>&1; then true; elif command -v setsid >/dev/null 2>&1; then setsid -f sh -c \"exec 9>&-; exec airi-debug >/tmp/airi-debug.log 2>&1\" </dev/null >/dev/null 2>&1; else nohup airi-debug </dev/null >/tmp/airi-debug.log 2>&1 9>&- & fi; fi; for i in $(seq 1 120); do if curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9229/json >/dev/null 2>&1; then echo \"AIRI debuggers ready\"; exit 0; fi; sleep 2; done; echo \"AIRI debuggers did not become ready\"; exit 1"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "AIRI: Start airi-dev container only",
+      "type": "shell",
+      "command": "docker start airi-dev",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "AIRI: Show AIRI app logs",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "if test -f /tmp/airi-debug.log; then tail -f /tmp/airi-debug.log; else docker exec airi-dev tail -f /tmp/airi-debug.log; fi"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    }
+  ]
+}

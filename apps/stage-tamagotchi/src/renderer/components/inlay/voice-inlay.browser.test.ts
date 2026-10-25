@@ -86,7 +86,7 @@ function inlayView() {
   return document.querySelector<HTMLElement>('[data-testid="voice-inlay"]')?.dataset.view ?? 'hidden'
 }
 
-const capturing = { requestId: 'speech', sessionId: 'alice', phase: 'capturing' as const }
+const capturing = { requestId: 'speech', sessionId: 'alice', trigger: 'wake-word' as const, phase: 'capturing' as const }
 const draft = { id: 'draft', sessionId: 'alice', rawText: 'hello', text: 'Hello there.' }
 
 describe('voice inlay', () => {
@@ -124,6 +124,19 @@ describe('voice inlay', () => {
 
     await expect.poll(inlayView).toBe('card')
     await expect.element(view.getByTestId('voice-draft-live')).toHaveTextContent('What time')
+  })
+
+  it('uses a pale green wake tone and a pale violet transcription tone', async () => {
+    const view = renderInlay()
+
+    publish({ drafts: [], input: { ...capturing, text: '', segments: [] } })
+    await expect.poll(() => document.querySelector<HTMLElement>('[data-testid="voice-inlay"]')?.dataset.tone).toBe('wake')
+    expect(document.querySelector('[data-testid="voice-inlay"]')?.classList.contains('bg-emerald-100/90')).toBe(true)
+
+    publish({ drafts: [], input: { ...capturing, phase: 'finalizing', text: '', segments: [] } })
+    await expect.poll(() => document.querySelector<HTMLElement>('[data-testid="voice-inlay"]')?.dataset.tone).toBe('transcribing')
+    expect(document.querySelector('[data-testid="voice-inlay"]')?.classList.contains('bg-violet-100/90')).toBe(true)
+    await expect.element(view.getByRole('status')).toHaveTextContent('stage.status.transcribing')
   })
 
   it('shows the sent text while the card moves out, then paints nothing', async () => {
