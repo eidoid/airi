@@ -40,6 +40,13 @@ export interface TtsInputChunkOptions {
   minimumWords?: number
   /** @default 12 */
   maximumWords?: number
+  /**
+   * Minimum words before hard punctuation can end a chunk after the opening boost chunks.
+   * A larger value uses fewer TTS requests for many short sentences.
+   *
+   * @default 12
+   */
+  batchWords?: number
   stripNarrative?: boolean
   keepNarrativeText?: boolean
 }
@@ -58,6 +65,7 @@ export async function* chunkTtsInput(
     boost = 2,
     minimumWords = 4,
     maximumWords = 12,
+    batchWords = 12,
   } = options ?? {}
 
   const iterator = readGraphemeClusters(
@@ -158,6 +166,10 @@ export async function* chunkTtsInput(
       chunkWordsCount += words.length
       buffer = ''
 
+      const openingChunkReady = !hard && yieldCount < boost && chunkWordsCount >= minimumWords
+      const hardBoundaryReady = value === '\n'
+        || (hard && chunkWordsCount >= (yieldCount < boost ? minimumWords : batchWords))
+
       if (special) {
         const text = chunk.slice(0, -1).trim()
         yield {
@@ -171,7 +183,7 @@ export async function* chunkTtsInput(
       }
       // A boost chunk ends early at soft punctuation only once it is long enough to be worth its
       // own TTS request. A shorter opening clause stays in the chunk and joins the next one.
-      else if (flush || hard || chunkWordsCount > maximumWords || (yieldCount < boost && chunkWordsCount >= minimumWords)) {
+      else if (flush || hardBoundaryReady || chunkWordsCount > maximumWords || openingChunkReady) {
         const text = chunk.trim()
         yield {
           text,

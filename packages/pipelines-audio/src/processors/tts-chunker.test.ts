@@ -42,6 +42,22 @@ describe('chunkTtsInput boost', () => {
 
     expect(chunks[0]).toMatchObject({ text: 'I really want to tell you something,', reason: 'boost' })
   })
+
+  // ROOT CAUSE:
+  //
+  // A long reply made 25 TTS requests in five seconds.
+  // The provider rate limit is 20 requests per minute.
+  // One rejected request then stopped every queued sentence.
+  //
+  // We batch short sentences after the opening boost chunks.
+  it('batches later short sentences into fewer requests', async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `Line ${index + 1}.`).join(' ')
+
+    const chunks = await collectChunks(text)
+
+    expect(chunks.length).toBeLessThanOrEqual(6)
+    expect(chunks.map(chunk => chunk.text).join(' ')).toBe(text)
+  })
 })
 
 describe('tTS Chunker Logic Cleanup', () => {
