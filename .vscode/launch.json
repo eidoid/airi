@@ -5,13 +5,14 @@
       "name": "Debug Electron",
       "type": "node",
       "request": "launch",
-      // Where to run the command
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-F", "@proj-airi/stage-tamagotchi", "exec", "electron-vite", "--sourcemap"],
-      // Open terminal when debugging starts (Optional)
-      // Useful to see console.logs
-      // "console": "integratedTerminal",
-      // "internalConsoleOptions": "neverOpen",
+      "runtimeArgs": [
+        "-F",
+        "@proj-airi/stage-tamagotchi",
+        "exec",
+        "electron-vite",
+        "--sourcemap"
+      ],
       "env": {
         "REMOTE_DEBUGGING_PORT": "9222"
       }
@@ -20,26 +21,58 @@
       "name": "Debug Minecraft Service",
       "type": "node",
       "request": "launch",
-      // Where to run the command
-      // Where to run the command
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-F", "@proj-airi/minecraft-bot", "exec", "tsx"],
-      "args": ["--env-file=.env", "--env-file-if-exists=.env.local", "src/main.ts"],
+      "runtimeArgs": [
+        "-F",
+        "@proj-airi/minecraft-bot",
+        "exec",
+        "tsx"
+      ],
+      "args": [
+        "--env-file=.env",
+        "--env-file-if-exists=.env.local",
+        "src/main.ts"
+      ],
       "envFile": "${workspaceFolder}/integrations/minecraft/.env",
-      // Open terminal when debugging starts (Optional)
-      // Useful to see console.logs
-      // "console": "integratedTerminal",
-      // "internalConsoleOptions": "neverOpen",
       "skipFiles": [
         "<node_internals>/**"
       ]
+    },
+    {
+      "name": "Attach AIRI Main (airi-dev)",
+      "type": "node",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "/usr/src/airi",
+      "sourceMaps": true,
+      "timeout": 60000,
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "preLaunchTask": "AIRI: Start and wait for debuggers"
+    },
+    {
+      "name": "Attach AIRI Renderer (airi-dev)",
+      "type": "chrome",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/apps/stage-tamagotchi/src/renderer",
+      "sourceMaps": true,
+      "timeout": 60000,
+      "pathMapping": {
+        "/usr/src/airi": "${workspaceFolder}"
+      },
+      "preLaunchTask": "AIRI: Start and wait for debuggers"
     },
     {
       "name": "Debug Renderer Process",
       "port": 9222,
       "request": "attach",
       "type": "chrome",
-      "webRoot": "${workspaceFolder}/src/renderer",
+      "webRoot": "${workspaceFolder}/apps/stage-tamagotchi/src/renderer",
       "timeout": 60000,
       "presentation": {
         "hidden": true
@@ -59,10 +92,25 @@
   ],
   "compounds": [
     {
-      "name": "Debug All",
-      "configurations": ["Debug Electron", "Debug Renderer Process"],
+      "name": "Attach AIRI (airi-dev)",
+      "configurations": [
+        "Attach AIRI Main (airi-dev)",
+        "Attach AIRI Renderer (airi-dev)"
+      ],
+      "stopAll": true,
       "presentation": {
         "order": 1
+      },
+      "preLaunchTask": "AIRI: Start and wait for debuggers"
+    },
+    {
+      "name": "Debug All",
+      "configurations": [
+        "Debug Electron",
+        "Debug Renderer Process"
+      ],
+      "presentation": {
+        "order": 2
       }
     }
   ]

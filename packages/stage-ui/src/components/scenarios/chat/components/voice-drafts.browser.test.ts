@@ -45,6 +45,7 @@ describe('voiceDrafts', () => {
       input: {
         requestId: 'speech',
         sessionId: 'alice',
+        trigger: 'speech',
         phase: 'capturing',
         text: 'Second part. Still talking',
         segments: [
@@ -64,7 +65,7 @@ describe('voiceDrafts', () => {
   })
 
   it('shows a silent capture only when the host asks for it', async () => {
-    const silentInput = { requestId: 'speech', sessionId: 'alice', phase: 'capturing' as const, text: '', segments: [] }
+    const silentInput = { requestId: 'speech', sessionId: 'alice', trigger: 'speech' as const, phase: 'capturing' as const, text: '', segments: [] }
 
     const hidden: boolean[] = []
     const plain = renderComposer({ onPresence: (visible: boolean) => hidden.push(visible) })
@@ -164,7 +165,7 @@ describe('voiceDrafts', () => {
     const emit = (count: number) => context.emit(voiceSnapshotChanged, {
       connected: true,
       drafts: [],
-      input: { requestId: 'speech', sessionId: 'alice', phase: 'capturing', text: '', segments: segments.slice(0, count) },
+      input: { requestId: 'speech', sessionId: 'alice', trigger: 'speech', phase: 'capturing', text: '', segments: segments.slice(0, count) },
     })
 
     emit(2)
@@ -185,7 +186,7 @@ describe('voiceDrafts', () => {
       connected: true,
       drafts: [draft],
       frontDraftId: 'draft',
-      input: { requestId: 'speech', sessionId: 'alice', phase: 'finalizing', text: 'hello', segments: [{ id: 'speech-0', text: 'hello', final: true }] },
+      input: { requestId: 'speech', sessionId: 'alice', trigger: 'speech', phase: 'finalizing', text: 'hello', segments: [{ id: 'speech-0', text: 'hello', final: true }] },
     })
     await expect.element(view.getByText('Finishing…')).toBeVisible()
 
@@ -193,7 +194,7 @@ describe('voiceDrafts', () => {
       connected: true,
       drafts: [draft],
       frontDraftId: 'draft',
-      input: { requestId: 'speech', sessionId: 'alice', phase: 'settled', text: 'hello', segments: [{ id: 'speech-0', text: 'hello', final: true }] },
+      input: { requestId: 'speech', sessionId: 'alice', trigger: 'speech', phase: 'settled', text: 'hello', segments: [{ id: 'speech-0', text: 'hello', final: true }] },
     })
 
     await expect.element(view.getByRole('textbox', { name: 'Voice draft' })).toHaveValue('Hello there.')

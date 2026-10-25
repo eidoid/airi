@@ -3,7 +3,7 @@ import { BasicButton } from '@proj-airi/ui'
 import { computed, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
-  tone?: 'neutral' | 'error'
+  tone?: 'neutral' | 'wake' | 'transcribing' | 'error'
   label: string
   details?: string
   placement?: 'above' | 'below'
@@ -18,6 +18,21 @@ const props = withDefaults(defineProps<{
 
 const expanded = ref(false)
 const showDetails = computed(() => expanded.value || props.reveal)
+const toneTextClass = computed(() => {
+  switch (props.tone) {
+    case 'wake': return 'text-emerald-700 dark:text-emerald-200'
+    case 'transcribing': return 'text-violet-700 dark:text-violet-200'
+    case 'error': return 'text-orange-600 dark:text-orange-300'
+    default: return 'text-primary-600 dark:text-primary-300'
+  }
+})
+const toneSurfaceClass = computed(() => {
+  switch (props.tone) {
+    case 'wake': return 'bg-emerald-100/85 dark:bg-emerald-950/65'
+    case 'transcribing': return 'bg-violet-100/85 dark:bg-violet-950/65'
+    default: return 'bg-neutral-50/75 dark:bg-neutral-900/65'
+  }
+})
 </script>
 
 <template>
@@ -30,12 +45,12 @@ const showDetails = computed(() => expanded.value || props.reveal)
       :class="[
         'status-capsule min-h-11 min-w-16 flex items-center justify-center rounded-full outline-none',
         'focus-visible:ring-2 focus-visible:ring-primary-400',
-        tone === 'error' ? 'text-orange-600 dark:text-orange-300' : 'text-primary-600 dark:text-primary-300',
+        toneTextClass,
       ]"
       @click="expanded = !expanded"
       @keydown.esc="expanded = false"
     >
-      <span :class="['min-h-7 min-w-16 flex items-center justify-center rounded-full bg-neutral-50/75 px-3 backdrop-blur-md dark:bg-neutral-900/65']">
+      <span :class="['min-h-7 min-w-16 flex items-center justify-center rounded-full px-3 backdrop-blur-md', toneSurfaceClass]">
         <slot name="indicator" />
         <span aria-hidden="true" :class="['status-label overflow-hidden whitespace-nowrap text-xs', reveal ? 'ml-1.5 max-w-48 opacity-100' : 'max-w-0 opacity-0']">{{ label }}</span>
       </span>

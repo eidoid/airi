@@ -19,11 +19,23 @@ import StatusCapsule from './status-capsule.vue'
       </div>
     </Variant>
     <Variant id="revealed" title="Visible label">
-      <StatusCapsule label="Listening" reveal :class="['m-4']">
-        <template #indicator>
-          <span :class="['i-solar:microphone-linear size-4']" />
-        </template>
-      </StatusCapsule>
+      <div :class="['flex items-center gap-4 p-4']">
+        <StatusCapsule label="Listening" reveal>
+          <template #indicator>
+            <span :class="['i-solar:microphone-linear size-4']" />
+          </template>
+        </StatusCapsule>
+        <StatusCapsule label="Wake word detected" reveal tone="wake">
+          <template #indicator>
+            <span :class="['i-solar:microphone-3-bold size-4']" />
+          </template>
+        </StatusCapsule>
+        <StatusCapsule label="Transcribing" reveal tone="transcribing">
+          <template #indicator>
+            <span :class="['i-solar:text-field-focus-bold size-4']" />
+          </template>
+        </StatusCapsule>
+      </div>
     </Variant>
   </Story>
 </template>
