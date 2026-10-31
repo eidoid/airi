@@ -51,6 +51,7 @@ const {
   modelSearchQuery,
   speechProviderError,
   ssmlEnabled,
+  ttsChunkWords,
   availableVoices,
 } = storeToRefs(speechStore)
 
@@ -195,6 +196,12 @@ const displayedSpeechVoiceId = computed({
     activeSpeechVoiceId.value = value
   },
 })
+
+function formatTtsChunkWords(value: number) {
+  return value === 0
+    ? t('settings.pages.modules.speech.sections.section.voice-settings.chunk-size.unlimited')
+    : `${value}`
+}
 
 const currentSpeechVoiceId = computed(() => activeSpeechVoiceId.value || '')
 
@@ -865,6 +872,13 @@ async function handleDeleteProvider(providerId: string) {
               v-model="ssmlEnabled"
               label="Enable SSML"
               description="Enable Speech Synthesis Markup Language for more control over speech output"
+            />
+            <FieldRange
+              v-model="ttsChunkWords"
+              :label="t('settings.pages.modules.speech.sections.section.voice-settings.chunk-size.label')"
+              :description="t('settings.pages.modules.speech.sections.section.voice-settings.chunk-size.description')"
+              :min="0" :max="500" :step="1"
+              :format-value="formatTtsChunkWords"
             />
           </div>
 

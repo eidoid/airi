@@ -78,6 +78,40 @@ describe('voiceController output', () => {
     await controller.close()
   })
 
+  it('sends a complete reply as one local TTS request without a length limit', async () => {
+    const requests: string[] = []
+    const playback = new Playback({ nowMs: () => 0, play: clip => ({
+      done: (clip.audio as Blob).text().then(() => ({ throughMs: 1 })),
+      stop: async () => ({ throughMs: 0 }),
+    }) })
+    const controller = new VoiceController({
+      speech: () => ({
+        playback,
+        ttsChunking: {
+          boost: 0,
+          minimumWords: 1,
+          maximumWords: Number.POSITIVE_INFINITY,
+          batchWords: Number.POSITIVE_INFINITY,
+          splitOnNewline: false,
+        },
+        synthesize: async (request) => {
+          requests.push(request.text)
+          return new Blob([request.text])
+        },
+      }),
+    })
+    const response = controller.openResponse({ sessionId: 'alice', turnId: 'long' })
+    const speech = response.openSpeech({ purpose: 'answer' })
+    const text = 'First sentence. Second sentence.\nThird sentence.'
+
+    speech.write(text)
+    speech.end()
+
+    expect(await response.finish()).toBe('finished')
+    expect(requests).toEqual([text])
+    await controller.close()
+  })
+
   it('preserves earlier reserved speech when an intermediate producer is cancelled', async () => {
     const firstAudio = Promise.withResolvers<Blob>()
     const played: string[] = []

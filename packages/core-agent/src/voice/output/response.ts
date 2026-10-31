@@ -1,4 +1,4 @@
-import type { AudioPlayback, IntentHandle, PcmBlock, PlaybackGroup, PlaybackItem, PlaybackReceipt, SpeechPipelineEvents, SpeechPipelineOptions } from '@proj-airi/pipelines-audio'
+import type { AudioPlayback, IntentHandle, PcmBlock, PlaybackGroup, PlaybackItem, PlaybackReceipt, SpeechPipelineEvents, SpeechPipelineOptions, TtsInputChunkOptions } from '@proj-airi/pipelines-audio'
 
 import type { TurnRef } from '../turn'
 
@@ -36,6 +36,8 @@ export type SpeechOutput = {
   readonly onPlaybackStart?: (clip: SpeechClip) => void
   /** Runs once for each started clip after playback ends, stops, or fails. */
   readonly onPlaybackEnd?: (clip: SpeechClip, end: SpeechClipEnd) => void
+  /** Local text chunking for synthesize providers. Streaming providers use their upstream sentence boundaries. */
+  readonly ttsChunking?: TtsInputChunkOptions
 } & ({
   readonly synthesize: SpeechPipelineOptions<Blob>['tts']
 } | {
@@ -92,6 +94,7 @@ export class SpeechStream {
     }
     const pending = new Set<PlaybackItem<Blob>>()
     const pipeline = createSpeechPipeline<Blob>({
+      ttsChunking: this.output.ttsChunking,
       tts: async (request, signal) => {
         try {
           const audio = await output.synthesize(request, AbortSignal.any([signal, this.signal, response.signal]))

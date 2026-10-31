@@ -1207,6 +1207,13 @@ pages:
             show_more: Show more
             title: Provider
           voice-settings:
+            chunk-size:
+              label: TTS request length
+              description: >-
+                Approximate word limit for one local TTS request. Set to 0 to
+                send the complete reply. Long requests can delay the first
+                audio. Streaming providers ignore this setting.
+              unlimited: No limit
             input-ssml:
               placeholder: Enter SSML text...
             use-ssml:

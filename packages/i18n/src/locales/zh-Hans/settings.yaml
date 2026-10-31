@@ -1147,6 +1147,12 @@ pages:
             show_more: 显示更多
             title: 选择语音合成服务来源
           voice-settings:
+            chunk-size:
+              label: TTS 请求长度
+              description: >-
+                单次本地 TTS 请求的大致词数上限。设为 0 时发送完整回复。
+                请求越长，首段音频可能越晚开始。流式服务不使用此设置。
+              unlimited: 不限制
             input-ssml:
               placeholder: 请输入 SSML 文本
             use-ssml:

@@ -47,6 +47,12 @@ export interface TtsInputChunkOptions {
    * @default 12
    */
   batchWords?: number
+  /**
+   * End a chunk at a newline.
+   *
+   * @default true
+   */
+  splitOnNewline?: boolean
   stripNarrative?: boolean
   keepNarrativeText?: boolean
 }
@@ -66,6 +72,7 @@ export async function* chunkTtsInput(
     minimumWords = 4,
     maximumWords = 12,
     batchWords = 12,
+    splitOnNewline = true,
   } = options ?? {}
 
   const iterator = readGraphemeClusters(
@@ -133,6 +140,9 @@ export async function* chunkTtsInput(
       }
 
       if (buffer.length === 0) {
+        if (!splitOnNewline && ['\n', '\r', '\t'].includes(value))
+          chunk += value
+
         if (special) {
           yield {
             text: '',
@@ -167,7 +177,7 @@ export async function* chunkTtsInput(
       buffer = ''
 
       const openingChunkReady = !hard && yieldCount < boost && chunkWordsCount >= minimumWords
-      const hardBoundaryReady = value === '\n'
+      const hardBoundaryReady = (value === '\n' && splitOnNewline)
         || (hard && chunkWordsCount >= (yieldCount < boost ? minimumWords : batchWords))
 
       if (special) {
