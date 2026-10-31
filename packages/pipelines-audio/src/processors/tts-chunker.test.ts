@@ -157,6 +157,20 @@ describe('tTS Chunker Logic Cleanup', () => {
       expect(await collectChunkText('abc\r\ndef')).toEqual(['abc', 'def'])
     })
 
+    it('keeps newlines when hard boundaries are disabled', async () => {
+      const chunks: string[] = []
+      for await (const chunk of chunkTtsInput('First.\nSecond.', {
+        boost: 0,
+        minimumWords: 1,
+        maximumWords: Number.POSITIVE_INFINITY,
+        batchWords: Number.POSITIVE_INFINITY,
+        splitOnNewline: false,
+      }))
+        chunks.push(chunk.text)
+
+      expect(chunks).toEqual(['First.\nSecond.'])
+    })
+
     // ROOT CAUSE:
     //
     // `readGraphemeClusters` returns multi-code-unit grapheme strings.

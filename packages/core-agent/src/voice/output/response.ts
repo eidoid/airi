@@ -1,4 +1,4 @@
-import type { AudioPlayback, IntentHandle, PcmBlock, PlaybackGroup, PlaybackItem, PlaybackReceipt, SpeechPipelineEvents, SpeechPipelineOptions, TtsRequest } from '@proj-airi/pipelines-audio'
+import type { AudioPlayback, IntentHandle, PcmBlock, PlaybackGroup, PlaybackItem, PlaybackReceipt, SpeechPipelineEvents, SpeechPipelineOptions, TtsInputChunkOptions, TtsRequest } from '@proj-airi/pipelines-audio'
 import type { Outcome } from '@proj-airi/stream-kit'
 
 import type { TurnRef } from '../turn'
@@ -45,6 +45,8 @@ export type SpeechOutput = {
   readonly onPlaybackEnd?: (clip: SpeechClip, end: SpeechClipEnd) => void
   /** BCP 47 code of the voice. The words around a formula or a price select its language first. */
   readonly language?: string
+  /** Local text chunking for synthesize providers. Streaming providers use their upstream sentence boundaries. */
+  readonly ttsChunking?: TtsInputChunkOptions
 } & ({
   readonly synthesize: SpeechPipelineOptions<Blob>['tts']
 } | {
@@ -168,6 +170,7 @@ export class SpeechStream {
     const pending = new Set<PlaybackItem<Blob>>()
 
     const pipeline = createSpeechPipeline<Blob>({
+      ttsChunking: this.output.ttsChunking,
       tts: async (request, signal) => {
         const { segmentId } = request
         response.emit({ type: 'tts-request', segmentId, text: request.text, reason: request.reason })

@@ -1,4 +1,5 @@
 import type { SpeechOutput, TurnRef } from '@proj-airi/core-agent'
+import type { TtsInputChunkOptions } from '@proj-airi/pipelines-audio'
 import type { SpeechProvider, SpeechProviderWithExtraOptions } from '@xsai-ext/providers/utils'
 import type {} from 'pinia-plugin-synced'
 
@@ -165,6 +166,7 @@ export const useSpeechStore = defineStore('speech', () => {
   const pitch = useLocalStorageManualReset<number>('settings/speech/pitch', 0, persistenceOptions)
   const rate = useLocalStorageManualReset<number>('settings/speech/rate', 1, persistenceOptions)
   const ssmlEnabled = useLocalStorageManualReset<boolean>('settings/speech/ssml-enabled', false, persistenceOptions)
+  const ttsChunkWords = useLocalStorageManualReset<number>('settings/speech/tts-chunk-words', 12, persistenceOptions)
   // Each provider owns its latest request status. Settings for the active
   // provider and background provider editors must not consume each other's IO.
   const isLoadingSpeechProviderVoices = computed(() => voiceCatalogStatus.value[activeSpeechProvider.value]?.loading ?? false)
@@ -630,6 +632,30 @@ export const useSpeechStore = defineStore('speech', () => {
     return response
   }
 
+  function resolveTtsChunkingOptions(maximumWords: number): TtsInputChunkOptions | undefined {
+    const normalizedWords = Number.isFinite(maximumWords) ? Math.max(0, Math.floor(maximumWords)) : 12
+
+    // Keep the tuned balanced defaults until the user changes the request length.
+    if (normalizedWords === 12)
+      return undefined
+
+    // An explicit request length disables the opening soft-punctuation boost.
+    return normalizedWords === 0
+      ? {
+          boost: 0,
+          minimumWords: 1,
+          maximumWords: Number.POSITIVE_INFINITY,
+          batchWords: Number.POSITIVE_INFINITY,
+          splitOnNewline: false,
+        }
+      : {
+          boost: 0,
+          minimumWords: Math.min(4, normalizedWords),
+          maximumWords: normalizedWords,
+          batchWords: normalizedWords,
+        }
+  }
+
   /** Captures one response's provider, voice, model, and settings before any asynchronous work. */
   function createOutput(turn: TurnRef, selection: AiriExtension['modules']['speech'], output: Pick<SpeechOutput, 'playback' | 'onPlaybackStart' | 'onPlaybackEnd' | 'onSpecial'>, audioContext: AudioContext): SpeechOutput {
     if (!enabled.value)
@@ -644,6 +670,7 @@ export const useSpeechStore = defineStore('speech', () => {
     const canUseSSML = ['elevenlabs', 'microsoft-speech', 'azure-speech'].includes(providerId) || (providerId === 'alibaba-cloud-model-studio' && model === 'cosyvoice-v2')
     const pitchValue = pitch.value
     const language = voice?.languages[0]?.code
+    const ttsChunking = resolveTtsChunkingOptions(ttsChunkWords.value)
     const voiceType = providerId === OFFICIAL_SPEECH_PROVIDER_ID || providerId === OFFICIAL_SPEECH_STREAMING_PROVIDER_ID
       ? 'official_selected' as const
       : 'custom_configured' as const
@@ -666,7 +693,7 @@ export const useSpeechStore = defineStore('speech', () => {
     if (!model || !voiceId)
       throw new Error('Speech requires a model and voice')
     const provider = providersStore.getProviderInstance<SpeechProviderWithExtraOptions<string, Record<string, unknown>>>(providerId)
-    return { ...output, language, synthesize: async (request, signal) => {
+    return { ...output, language, ttsChunking, synthesize: async (request, signal) => {
       signal = AbortSignal.any([signal, synthesisSignal])
       signal.throwIfAborted()
       const client = await provider
@@ -796,6 +823,7 @@ export const useSpeechStore = defineStore('speech', () => {
     pitch.reset()
     rate.reset()
     ssmlEnabled.reset()
+    ttsChunkWords.reset()
     modelSearchQuery.reset()
     catalog.$patch((state) => {
       state.availableVoices = {}
@@ -815,6 +843,7 @@ export const useSpeechStore = defineStore('speech', () => {
     pitch,
     rate,
     ssmlEnabled,
+    ttsChunkWords,
     voiceCatalogStatus: computed(() => voiceCatalogStatus.value),
     isLoadingSpeechProviderVoices,
     speechProviderError,

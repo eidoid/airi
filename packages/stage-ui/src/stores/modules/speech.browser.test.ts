@@ -204,6 +204,7 @@ describe('speech synchronization', () => {
     })
     follower.speechStore.pitch = 15
     follower.speechStore.ssmlEnabled = true
+    follower.speechStore.ttsChunkWords = 200
     await vi.waitFor(() => expect(delayed.length).toBeGreaterThan(0))
     stubCatalogFetch(vi.fn<typeof fetch>(async () => Response.json({ voices: [{ id: 'fresh', name: 'Fresh', languages: [] }] })))
     await leader.speechStore.loadVoiceCatalog('microsoft-speech', 'model', {
@@ -215,6 +216,7 @@ describe('speech synchronization', () => {
     for (const deliver of delayed)
       deliver()
     await vi.waitFor(() => expect(leader.speechStore.pitch).toBe(15))
+    expect(leader.speechStore.ttsChunkWords).toBe(200)
     expect(leader.speechStore.availableVoices['microsoft-speech']?.[0]?.id).toBe('fresh')
     expect(leader.speechStore.voiceCatalogIdentities['microsoft-speech']?.model).toBe('model')
     expect(follower.speechStore.$state).not.toHaveProperty('availableVoices')
