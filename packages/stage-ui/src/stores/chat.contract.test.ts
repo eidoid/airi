@@ -550,7 +550,9 @@ describe('chat store contract', () => {
 
   it('uses the target character settings for a voice submission', async () => {
     cardSelections.set('bob', { provider: 'bob-provider', model: 'bob-model' })
-    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+    const requests: Conversation[] = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, messages: Conversation, options: StreamOptions) => {
+      requests.push(messages)
       await options.onStreamEvent?.({ type: 'finish' })
     })
     const store = useChatStore()
@@ -559,6 +561,7 @@ describe('chat store contract', () => {
     expect(getChatProviderInstanceMock).toHaveBeenCalledWith('bob-provider', { reasoning: 'disabled' })
     expect(llmStreamMock.mock.calls[0]?.[0]).toBe('bob-model')
     expect(activeSessionIdRef.value).toBe('session-1')
+    expect(JSON.stringify(requests[0])).toContain('After a tool runs')
   })
 
   it('resolves the provider and rebuilds prior tools inside the serializable send action', async () => {

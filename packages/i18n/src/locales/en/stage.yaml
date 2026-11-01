@@ -172,6 +172,7 @@ chat:
   web-search-tool-call:
     results: 'Results for "{query}" · {count}'
   tool-calls:
+    fallback-speech: The task is complete.
     running-one: 'Using {name}'
     failed-one: "{name} didn't finish"
     combo-running: 'Combo ×{count}'

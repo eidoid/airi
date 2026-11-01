@@ -172,6 +172,7 @@ chat:
   web-search-tool-call:
     results: '“{query}” 的搜索结果 · {count} 条'
   tool-calls:
+    fallback-speech: 任务已完成。
     running-one: '正在 {name}'
     failed-one: '{name} 没成功'
     combo-running: '连击 ×{count}'

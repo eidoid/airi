@@ -1318,6 +1318,7 @@ export const useChatStore = defineStore('chat', () => {
       temperature,
       topP,
       systemPromptSupplement,
+      toolReplyFallback: voice && isOwnerSend(payload, extra) ? t('stage.chat.tool-calls.fallback-speech') : undefined,
       ...extra,
       stickers,
       tools: async () => {

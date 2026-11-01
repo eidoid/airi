@@ -1,7 +1,7 @@
 import type { GenerationProvider } from '@proj-airi/provider-inference'
 import type { Message } from '@xsai/shared-chat'
 
-import type { Conversation } from '../messages/types'
+import type { AssistantTurn, Conversation } from '../messages/types'
 import type { ChatHistoryItem, ContextMessage, StreamingAssistantMessage } from '../types/chat'
 import type { StreamEvent, StreamOptions } from '../types/llm'
 import type { ChatOrchestratorSessionPort } from './chat-orchestrator-runtime'
@@ -166,6 +166,13 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
   }
 }
 
+function assistantTurnFrom(messages: Message[]): AssistantTurn {
+  const [turn] = chatMessagesToTurns(messages)
+  if (turn?.type !== 'assistant')
+    throw new Error('Expected assistant turn')
+  return turn
+}
+
 describe('createChatOrchestratorRuntime', () => {
   // https://github.com/moeru-ai/airi/issues/2899
   // ROOT CAUSE:
@@ -321,6 +328,135 @@ describe('createChatOrchestratorRuntime', () => {
     else {
       expect(saved?.role === 'assistant' && saved.generationTranscript).toEqual(generatedTurn)
     }
+  })
+
+  // ROOT CAUSE:
+  //
+  // A voice turn can finish its tool rounds without speech.
+  // The runtime stored it as complete, so the Stage sent no literal to TTS.
+  // The recovery asks for a tool-free reply. A local fallback keeps the turn audible.
+  it('requests a tool-free final reply for a silent voice tool turn', async () => {
+    const harness = createHarness()
+    const literals: string[] = []
+    const weatherTool = {
+      execute: vi.fn(),
+      type: 'function' as const,
+      function: {
+        name: 'weather',
+        parameters: { type: 'object', properties: {} },
+      },
+    }
+    const toolTurn = assistantTurnFrom([
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{
+          id: 'call-weather',
+          type: 'function',
+          function: { name: 'weather', arguments: '{}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-weather',
+        content: 'sunny',
+      },
+    ])
+    let finalMessages: Message[] = []
+
+    harness.runtime.hooks.onTokenLiteral(async (literal) => {
+      literals.push(literal)
+    })
+    harness.stream.mockImplementationOnce(async (_model, _provider, _messages, options) => {
+      await options?.onStreamEvent?.({ type: 'tool-call', toolCallId: 'call-weather', toolCallType: 'function', toolName: 'weather', args: '{}' })
+      await options?.onStreamEvent?.({ type: 'tool-result', toolCallId: 'call-weather', result: 'sunny' })
+      await options?.onGeneratedTurn?.(toolTurn)
+      await options?.onStreamEvent?.({ type: 'finish' })
+    })
+    harness.stream.mockImplementationOnce(async (_model, _provider, messages, options) => {
+      finalMessages = conversationToChatMessages(messages)
+      await options?.onStreamEvent?.({ type: 'text-delta', text: 'The weather is sunny.' })
+      await options?.onGeneratedTurn?.(assistantTurnFrom([{ role: 'assistant', content: 'The weather is sunny.' }]))
+      await options?.onStreamEvent?.({ type: 'finish' })
+    })
+
+    await harness.runtime.ingest('What is the weather?', {
+      model: 'test',
+      chatProvider: provider,
+      input: { type: 'input:voice', data: { audio: new ArrayBuffer(0) } },
+      toolReplyFallback: 'The task is complete.',
+      tools: [weatherTool],
+      resolveStep: async () => ({
+        model: 'test',
+        chatProvider: provider,
+        providerId: 'mock-provider',
+        systemPrompt: 'system prompt',
+        tools: [weatherTool],
+      }),
+    })
+
+    expect(harness.stream).toHaveBeenCalledTimes(2)
+    expect(harness.stream.mock.calls[1]![3]?.tools).toBeUndefined()
+    const recoveryStep = await harness.stream.mock.calls[1]![3]?.resolveStep?.()
+    expect(recoveryStep?.tools).toBeUndefined()
+    expect(recoveryStep?.systemPrompt).toContain('The tools have finished.')
+    expect(finalMessages.map(message => message.role)).toEqual(expect.arrayContaining(['tool', 'user']))
+    expect(finalMessages.at(-1)?.content).toContain('The tools have finished.')
+    expect(literals.join('')).toBe('The weather is sunny.')
+    const saved = harness.sessionMessages['session-1'].findLast(message => message.role === 'assistant')
+    expect(saved?.content).toBe('The weather is sunny.')
+    expect(saved?.role === 'assistant' && saved.generationTranscript?.rounds).toHaveLength(2)
+  })
+
+  it('uses the local fallback when the final tool-free reply is still silent', async () => {
+    const harness = createHarness()
+    const literals: string[] = []
+    const toolTurn = assistantTurnFrom([
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{
+          id: 'call-memory',
+          type: 'function',
+          function: { name: 'save_memory', arguments: '{}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-memory',
+        content: 'saved',
+      },
+    ])
+
+    harness.runtime.hooks.onTokenLiteral(async (literal) => {
+      literals.push(literal)
+    })
+    harness.stream.mockImplementationOnce(async (_model, _provider, _messages, options) => {
+      await options?.onStreamEvent?.({ type: 'tool-call', toolCallId: 'call-memory', toolCallType: 'function', toolName: 'save_memory', args: '{}' })
+      await options?.onStreamEvent?.({ type: 'tool-result', toolCallId: 'call-memory', result: 'saved' })
+      await options?.onGeneratedTurn?.(toolTurn)
+      await options?.onStreamEvent?.({ type: 'finish' })
+    })
+    harness.stream.mockImplementationOnce(async (_model, _provider, _messages, options) => {
+      await options?.onStreamEvent?.({ type: 'text-delta', text: '<|ACT {"emotion":"happy"}|>' })
+      await options?.onGeneratedTurn?.(assistantTurnFrom([{ role: 'assistant', content: '' }]))
+      await options?.onStreamEvent?.({ type: 'finish' })
+    })
+
+    await harness.runtime.ingest('Remember my name.', {
+      model: 'test',
+      chatProvider: provider,
+      input: { type: 'input:voice', data: { audio: new ArrayBuffer(0) } },
+      toolReplyFallback: 'The task is complete.',
+    })
+
+    expect(harness.stream).toHaveBeenCalledTimes(2)
+    expect(literals).toEqual(['The task is complete.'])
+    const saved = harness.sessionMessages['session-1'].findLast(message => message.role === 'assistant')
+    expect(saved?.content).toBe('The task is complete.')
+    expect(saved?.role === 'assistant' && saved.generationTranscript?.rounds.at(-1)?.content).toEqual([
+      { type: 'text', text: 'The task is complete.' },
+    ])
   })
 
   // ROOT CAUSE:

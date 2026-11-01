@@ -19,6 +19,9 @@ import { categorizeResponse, createStreamingCategorizer } from './response-categ
 
 const REASONING_UI_FLUSH_CHUNK_SIZE = 24
 
+const TOOL_FINAL_REPLY_PROMPT = 'After a tool runs, answer in one short spoken sentence. Do not end with only a tool call, a control marker, or a delay.'
+const TOOL_FINAL_REPLY_RECOVERY_PROMPT = 'The tools have finished. Give the user one short spoken answer now. Do not call a tool. Do not end with only a control marker.'
+
 /**
  * Caps repeated reply text in the model prompt. The referenced message remains
  * in history, so the prefix only needs enough text to identify it.
@@ -108,6 +111,21 @@ function hasAssistantOutput(message: StreamingAssistantMessage) {
     || !!message.categorization?.reasoning.trim()
 }
 
+function mergeLlmUsage(first: LlmUsage, second: LlmUsage): LlmUsage {
+  if (first.source === 'unavailable')
+    return second
+  if (second.source === 'unavailable')
+    return first
+
+  const sum = (a?: number, b?: number) => a == null && b == null ? undefined : (a ?? 0) + (b ?? 0)
+  return {
+    inputTokens: sum(first.inputTokens, second.inputTokens),
+    outputTokens: sum(first.outputTokens, second.outputTokens),
+    totalTokens: sum(first.totalTokens, second.totalTokens),
+    source: first.source === 'estimated' || second.source === 'estimated' ? 'estimated' : 'reported',
+  }
+}
+
 /**
  * Attachments belong to one user message. Media capture and storage stay outside chat orchestration.
  *
@@ -148,6 +166,11 @@ export interface ChatOrchestratorSendOptions {
   attachments?: ChatAttachment[]
   /** Tool definitions passed through to the LLM stream port. */
   tools?: StreamOptions['tools']
+  /**
+   * A short localized sentence for a speaking voice turn that has tool results but no visible speech.
+   * When set, the runtime asks the model for one tool-free final reply. It speaks this sentence if that reply is also silent.
+   */
+  toolReplyFallback?: string
   /**
    * Reads the current settings of the request owner before each model request.
    * The runtime appends this request's system prompt supplement to the returned prompt.
@@ -850,88 +873,97 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       const stickers = options.stickers
       let stickerEmitted = false
 
-      const parser = useLlmmarkerParser({
-        onLiteral: async (literal) => {
-          if (shouldAbort())
-            return
+      function createReplyParser() {
+        const categorizer = createStreamingCategorizer(activeProvider)
+        let streamPosition = 0
+        let pendingSpeechWhitespace = ''
+        let speechStarted = false
 
-          categorizer.consume(literal)
-
-          let speechOnly = categorizer.filterToSpeech(literal, streamPosition)
-          streamPosition += literal.length
-
-          if (speechOnly) {
-            if (!speechStarted) {
-              // Leading whitespace belongs to speech only after visible text arrives.
-              pendingSpeechWhitespace += speechOnly
-              if (!pendingSpeechWhitespace.trim())
-                return
-              speechOnly = pendingSpeechWhitespace
-              pendingSpeechWhitespace = ''
-              speechStarted = true
-            }
-            buildingMessage.content += speechOnly
-
-            await hooks.emitTokenLiteralHooks(speechOnly, streamingMessageContext)
+        return useLlmmarkerParser({
+          onLiteral: async (literal) => {
             if (shouldAbort())
               return
 
-            // Text after every content call has its result means that the model writes on instead of trying again. Text
-            // before a call can arrive late, when the call flushes it, so it does not count.
-            if (openContentCalls.size === 0 && speechOnly.trim())
-              delete buildingMessage.pendingContent
-            const lastSlice = buildingMessage.slices.at(-1)
-            if (lastSlice?.type === 'text') {
-              lastSlice.text += speechOnly
-            }
-            else {
-              buildingMessage.slices.push({
-                type: 'text',
-                text: speechOnly,
-              })
-            }
-            updateStream(sessionId, buildingMessage)
-          }
-        },
-        onSpecial: async (special) => {
-          if (shouldAbort())
-            return
+            categorizer.consume(literal)
 
-          if (/^<\|STICKER\b/.test(special)) {
-            // Text-based reasoning can contain markers too. Only visible speech can select an image.
-            if (!categorizer.filterToSpeech(special, streamPosition))
-              return
-            const id = /^<\|STICKER ([a-z0-9-]+)\|>$/.exec(special)?.[1]
-            if (!stickerEmitted && id && stickers?.some(sticker => sticker.id === id)) {
-              buildingMessage.slices.push({ type: 'sticker', stickerId: id })
-              stickerEmitted = true
+            let speechOnly = categorizer.filterToSpeech(literal, streamPosition)
+            streamPosition += literal.length
+
+            if (speechOnly) {
+              if (!speechStarted) {
+                // Leading whitespace belongs to speech only after visible text arrives.
+                pendingSpeechWhitespace += speechOnly
+                if (!pendingSpeechWhitespace.trim())
+                  return
+                speechOnly = pendingSpeechWhitespace
+                pendingSpeechWhitespace = ''
+                speechStarted = true
+              }
+              buildingMessage.content += speechOnly
+
+              await hooks.emitTokenLiteralHooks(speechOnly, streamingMessageContext)
+              if (shouldAbort())
+                return
+
+              // Text after every content call has its result means that the model writes on instead of trying again. Text
+              // before a call can arrive late, when the call flushes it, so it does not count.
+              if (openContentCalls.size === 0 && speechOnly.trim())
+                delete buildingMessage.pendingContent
+              const lastSlice = buildingMessage.slices.at(-1)
+              if (lastSlice?.type === 'text') {
+                lastSlice.text += speechOnly
+              }
+              else {
+                buildingMessage.slices.push({
+                  type: 'text',
+                  text: speechOnly,
+                })
+              }
               updateStream(sessionId, buildingMessage)
             }
-            // Sticker markers are UI data, including invalid IDs. Speech and plugins must not execute them.
-            return
-          }
+          },
+          onSpecial: async (special) => {
+            if (shouldAbort())
+              return
 
-          await hooks.emitTokenSpecialHooks(special, streamingMessageContext)
-        },
-        onEnd: async (fullText) => {
-          if (shouldAbort())
-            return
+            if (/^<\|STICKER\b/.test(special)) {
+              // Text-based reasoning can contain markers too. Only visible speech can select an image.
+              if (!categorizer.filterToSpeech(special, streamPosition))
+                return
+              const id = /^<\|STICKER ([a-z0-9-]+)\|>$/.exec(special)?.[1]
+              if (!stickerEmitted && id && stickers?.some(sticker => sticker.id === id)) {
+                buildingMessage.slices.push({ type: 'sticker', stickerId: id })
+                stickerEmitted = true
+                updateStream(sessionId, buildingMessage)
+              }
+              // Sticker markers are UI data, including invalid IDs. Speech and plugins must not execute them.
+              return
+            }
 
-          // Strip only sticker markers, including the escaped form accepted by the parser.
-          const speechText = fullText.replace(/<(?:\||\{'\|'\})STICKER\b[\s\S]*?(?:(?:\||\{'\|'\})>|$)/g, '')
-          const finalCategorization = categorizeResponse(speechText, activeProvider)
+            await hooks.emitTokenSpecialHooks(special, streamingMessageContext)
+          },
+          onEnd: async (fullText) => {
+            if (shouldAbort())
+              return
 
-          const reasoningContentField = buildingMessage.categorization?.reasoning?.trim()
-          buildingMessage.categorization = {
-            speech: finalCategorization.speech,
-            reasoning: reasoningContentField || finalCategorization.reasoning,
-          }
-          updateStream(sessionId, buildingMessage)
-        },
-        // The parser keeps its own marker-safety tail. Emit each safe literal
-        // chunk so slow providers update the chat before they reach 24 characters.
-        minLiteralEmitLength: 1,
-      })
+            // Strip only sticker markers, including the escaped form accepted by the parser.
+            const speechText = fullText.replace(/<(?:\||\{'\|'\})STICKER\b[\s\S]*?(?:(?:\||\{'\|'\})>|$)/g, '')
+            const finalCategorization = categorizeResponse(speechText, activeProvider)
+
+            const reasoningContentField = buildingMessage.categorization?.reasoning?.trim()
+            buildingMessage.categorization = {
+              speech: finalCategorization.speech,
+              reasoning: reasoningContentField || finalCategorization.reasoning,
+            }
+            updateStream(sessionId, buildingMessage)
+          },
+          // The parser keeps its own marker-safety tail. Emit each safe literal
+          // chunk so slow providers update the chat before they reach 24 characters.
+          minLiteralEmitLength: 1,
+        })
+      }
+
+      let parser = createReplyParser()
 
       const toolCallQueue = createQueue<ChatSlices>({
         handlers: [
@@ -983,7 +1015,8 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
             ...stickers.map(sticker => `<|STICKER ${sticker.id}|>: ${sticker.description}`),
           ].join('\n')
         : ''
-      const systemPromptSupplement = [options.systemPromptSupplement?.trim(), stickerPrompt].filter(Boolean).join('\n\n')
+      const toolReplyPrompt = options.toolReplyFallback?.trim() ? TOOL_FINAL_REPLY_PROMPT : ''
+      const systemPromptSupplement = [options.systemPromptSupplement?.trim(), stickerPrompt, toolReplyPrompt].filter(Boolean).join('\n\n')
       if (systemPromptSupplement) {
         const systemMessage = context.turns.find(turn => turn.type === 'system' && turn.authority === 'system')
         if (systemMessage?.type === 'system')
@@ -1200,6 +1233,143 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       await parser.end()
       if (shouldAbort())
         return
+
+      const toolReplyFallback = options.toolReplyFallback?.trim()
+      const usedTools = generatedTurn?.rounds.some(round => round.toolInvocations.length > 0)
+        || buildingMessage.slices.some(slice => slice.type === 'tool-call')
+      const hasSpeech = typeof buildingMessage.content === 'string' && buildingMessage.content.trim().length > 0
+      if (toolReplyFallback
+        && streamingMessageContext.speaks
+        && !options.notice
+        && !hasSpeech
+        && usedTools
+        && generatedTurn) {
+        const recoveryContext = structuredClone(context)
+        recoveryContext.turns.push(structuredClone(generatedTurn))
+        recoveryContext.turns.push({
+          id: 'tool-final-reply-instruction',
+          type: 'user',
+          content: [{ type: 'text', text: TOOL_FINAL_REPLY_RECOVERY_PROMPT }],
+        })
+
+        let recoveryTurn: AssistantTurn | undefined
+        let recoveryUsage: LlmUsage | undefined
+        parser = createReplyParser()
+        try {
+          await waitForProvider(deps.llm.stream(options.model, options.chatProvider, recoveryContext, {
+            headers,
+            providerId: activeProvider,
+            resolveStep: options.resolveStep
+              ? async () => {
+                const step = await options.resolveStep!()
+                return {
+                  ...step,
+                  systemPrompt: [step.systemPrompt, systemPromptSupplement, TOOL_FINAL_REPLY_RECOVERY_PROMPT].filter(Boolean).join('\n\n'),
+                  tools: undefined,
+                }
+              }
+              : undefined,
+            supportsAudioInput: options.supportsAudioInput,
+            supportsVisionInput: options.supportsVisionInput,
+            abortSignal,
+            generationRoundOffset: generatedTurn.rounds.length,
+            onGeneratedTurn: (turn) => { recoveryTurn = structuredClone(turn) },
+            requestCorrelation: {
+              conversationId: correlation.conversationId,
+              turnId: correlation.roundId,
+            },
+            tools: undefined,
+            temperature: options.temperature,
+            topP: options.topP,
+            onUsage: (usage) => {
+              if (shouldAbort())
+                return
+
+              recoveryUsage = usage
+              deps.onLlmGeneration?.({
+                ...correlation,
+                model: options.model,
+                provider: activeProvider,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                totalTokens: usage.totalTokens,
+                usageSource: usage.source,
+              })
+            },
+            onStreamEvent: async (event: StreamEvent) => {
+              if (shouldAbort())
+                return
+
+              switch (event.type) {
+                case 'text-delta':
+                  if (!llmFirstTokenEmitted) {
+                    llmFirstTokenEmitted = true
+                    deps.onLlmFirstToken?.({
+                      ...correlation,
+                      model: options.model,
+                      ttfbMs: Math.round(monotonicNow() - llmRequestStartedAt),
+                    })
+                  }
+                  fullText += event.text
+                  await parser.consume(event.text)
+                  break
+                case 'reasoning-delta':
+                  buildingMessage.categorization = {
+                    speech: typeof buildingMessage.content === 'string' ? buildingMessage.content : '',
+                    reasoning: `${buildingMessage.categorization?.reasoning ?? ''}${event.text}`,
+                  }
+                  updateStream(sessionId, buildingMessage)
+                  break
+                case 'finish':
+                  break
+                case 'error':
+                  throw event.error ?? new Error('Stream error')
+              }
+            },
+          }), abortSignal)
+          await parser.end()
+          if (shouldAbort())
+            return
+        }
+        catch (error) {
+          if (shouldAbort())
+            return
+          console.error('Final tool reply failed:', error)
+        }
+
+        if (recoveryTurn)
+          generatedTurn = { ...generatedTurn, rounds: [...generatedTurn.rounds, ...recoveryTurn.rounds] }
+        if (recoveryUsage)
+          generationUsage = mergeLlmUsage(generationUsage, recoveryUsage)
+
+        const hasRecoverySpeech = typeof buildingMessage.content === 'string' && buildingMessage.content.trim().length > 0
+        if (!hasRecoverySpeech) {
+          fullText += toolReplyFallback
+          buildingMessage.content = typeof buildingMessage.content === 'string' ? buildingMessage.content + toolReplyFallback : toolReplyFallback
+          await hooks.emitTokenLiteralHooks(toolReplyFallback, streamingMessageContext)
+          if (shouldAbort())
+            return
+          delete buildingMessage.pendingContent
+          buildingMessage.slices.push({ type: 'text', text: toolReplyFallback })
+          const finalCategorization = categorizeResponse(fullText, activeProvider)
+          buildingMessage.categorization = {
+            speech: finalCategorization.speech,
+            reasoning: buildingMessage.categorization?.reasoning || finalCategorization.reasoning,
+          }
+          if (generatedTurn) {
+            generatedTurn = {
+              ...generatedTurn,
+              rounds: [...generatedTurn.rounds, {
+                id: `${generatedTurn.id}/${generatedTurn.rounds.length}`,
+                content: [{ type: 'text', text: toolReplyFallback }],
+                toolInvocations: [],
+                projectionIssues: [],
+              }],
+            }
+          }
+          updateStream(sessionId, buildingMessage)
+        }
+      }
 
       generationCompleted = true
       buildingMessage.generationTranscript = generatedTurn
