@@ -866,10 +866,6 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
         sessionMessages: sessionMessagesForSend,
       })
 
-      const categorizer = createStreamingCategorizer(activeProvider)
-      let streamPosition = 0
-      let pendingSpeechWhitespace = ''
-      let speechStarted = false
       const stickers = options.stickers
       let stickerEmitted = false
 
