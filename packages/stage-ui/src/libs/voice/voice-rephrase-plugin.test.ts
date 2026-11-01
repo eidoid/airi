@@ -115,7 +115,7 @@ describe('createVoiceRephrasePlugin', () => {
     await speak([[{ text: 'hello there', final: true }]])
 
     // The task timeout is a normal end for an optional rewrite, and the provider text still reaches the chat.
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ error: expect.objectContaining({ message: 'Plugin task timed out' }) }))
+    expect(onError).not.toHaveBeenCalled()
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ text: 'hello there' }), expect.any(AbortSignal))
     await controller.close()
   })

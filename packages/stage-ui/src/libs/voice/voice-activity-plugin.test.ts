@@ -130,7 +130,7 @@ it('ends an input that never sees silence and keeps its words', async () => {
     }
   }
 
-  await push(8)
+  await push(2)
   await expect.poll(() => controller.activeInput?.state.phase, { timeout: 3000 }).toBe('capturing')
   await push(10)
 

@@ -89,7 +89,7 @@ describe('voiceDrafts', () => {
     context.emit(voiceSnapshotChanged, {
       connected: true,
       drafts: [],
-      input: { requestId: 'speech', sessionId: 'alice', phase: 'capturing', text: 'turn on the lite', segments: [{ id: 'speech-0', text: 'turn on the lite', final: true }] },
+      input: { requestId: 'speech', sessionId: 'alice', trigger: 'speech', phase: 'capturing', text: 'turn on the lite', segments: [{ id: 'speech-0', text: 'turn on the lite', final: true }] },
     })
     await expect.element(view.getByTestId('voice-draft-live')).toHaveTextContent('turn on the lite')
 
@@ -108,7 +108,7 @@ describe('voiceDrafts', () => {
     const view = renderComposer()
     const context = getSpeechBusContext()
     const draft = { id: 'draft', sessionId: 'alice', rawText: 'first', text: 'First sentence.' }
-    const speech = { requestId: 'speech', sessionId: 'alice', text: 'turn on the lite', segments: [{ id: 'speech-0', text: 'turn on the lite', final: true }] }
+    const speech = { requestId: 'speech', sessionId: 'alice', trigger: 'speech' as const, text: 'turn on the lite', segments: [{ id: 'speech-0', text: 'turn on the lite', final: true }] }
     context.emit(voiceSnapshotChanged, { connected: true, drafts: [draft], frontDraftId: 'draft', input: { ...speech, phase: 'capturing' } })
     await expect.element(view.getByTestId('voice-draft-live')).toHaveTextContent('First sentence. turn on the lite')
 

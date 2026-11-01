@@ -61,7 +61,7 @@ function snapshotOf(value: State, run: number): VoiceHostSnapshot {
   const draftId = `story-draft-${run}`
   switch (value) {
     case 'capsule':
-      return { connected: true, drafts: [], input: { requestId, sessionId: SESSION_ID, phase: 'capturing', text: '', segments: [] } }
+      return { connected: true, drafts: [], input: { requestId, sessionId: SESSION_ID, trigger: 'speech', phase: 'capturing', text: '', segments: [] } }
     case 'listening':
     case 'finalizing':
       return {
@@ -70,6 +70,7 @@ function snapshotOf(value: State, run: number): VoiceHostSnapshot {
         input: {
           requestId,
           sessionId: SESSION_ID,
+          trigger: 'speech',
           phase: value === 'listening' ? 'capturing' : 'finalizing',
           text: 'there is no meaning to your existence. just let go.',
           segments: [

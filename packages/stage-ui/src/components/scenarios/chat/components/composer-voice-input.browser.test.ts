@@ -41,7 +41,7 @@ async function mountInput(options: { dictation?: string, hidden?: () => boolean,
   cleanups.push(defineInvokeHandler(context, voiceInputCommand, async (command) => {
     commands.push(command)
     if (command.type === 'begin')
-      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, phase: options.captures === false ? 'pending' : 'capturing', text: 'how are', segments: [] } })
+      context.emit(voiceSnapshotChanged, { ...connected, input: { requestId: command.requestId, sessionId: command.sessionId, trigger: 'speech', phase: options.captures === false ? 'pending' : 'capturing', text: 'how are', segments: [] } })
     if (command.type === 'cancel')
       context.emit(voiceSnapshotChanged, connected)
     if (command.type === 'end') {

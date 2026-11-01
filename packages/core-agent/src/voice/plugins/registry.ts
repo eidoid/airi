@@ -271,7 +271,7 @@ class PluginInstallation<TNode> implements VoicePluginHandle {
 
         failures += 1
         if (failures > OBSERVATION_MAX_RESTARTS) {
-          this.report('subscription', new Error('Audio observation stopped after repeated failures'))
+          this.report('audio', new Error('Audio observation stopped after repeated failures'))
           completion.resolve(outcome)
           void scope.close()
           return

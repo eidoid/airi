@@ -42,6 +42,9 @@ import { useWakeWordDetectionStore } from './wake-word-detection'
 /** The longest time a chat model rewrite can delay a voice submission. */
 const VOICE_REPHRASE_TIMEOUT_MS = 10_000
 
+/** Silence that ends a speech input. The end judge can end a finished message at the pause. */
+const VOICE_END_SILENCE = { pauseMs: 1200, graceMs: 3000 } as const
+
 /** Application wiring owns presentation and durable chat adapters. The controller owns voice lifecycles. */
 export const useVoiceStore = defineStore('voice', () => {
   const devices = useSettingsAudioDevice()
@@ -605,8 +608,8 @@ export const useVoiceStore = defineStore('voice', () => {
       pauseReason: () => voiceMessages.isRecording
         ? 'a voice message is recording'
         : captureLease.held
-            ? 'another window holds the microphone'
-            : callActive.value && callMuted.value ? 'the call is muted' : undefined,
+          ? 'another window holds the microphone'
+          : callActive.value && callMuted.value ? 'the call is muted' : undefined,
       silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_SILENCE.pauseMs + hearing.endJudgeWaitMs : VOICE_END_SILENCE.pauseMs,
       // Automatic barge-in requires platform echo cancellation or an external echo classifier.
       acceptSpeech: options.acceptSpeech ?? (async () => !speaking.nowSpeaking || devices.source.echoCancellation),

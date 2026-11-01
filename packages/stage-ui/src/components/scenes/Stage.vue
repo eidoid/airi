@@ -44,14 +44,29 @@ import { useChatSessionStore } from '../../stores/chat/session-store'
 import { useSharedLive2DExpressionPreview } from '../../stores/live2d'
 import { useAiriCardStore } from '../../stores/modules/airi-card'
 import { useProactiveSpeechStore } from '../../stores/modules/proactive-speech'
-import { useSettingsProactiveSpeech } from '../../stores/settings/proactive-speech'
 import { useSpeechStore } from '../../stores/modules/speech'
 import { useSettingsPresenceBubble } from '../../stores/presence-bubble'
 import { useSettings } from '../../stores/settings'
+import { useSettingsProactiveSpeech } from '../../stores/settings/proactive-speech'
 import { useSettingsStageModel } from '../../stores/settings/stage-model'
 import { useSpeechOutputControlStore } from '../../stores/speech-output-control'
 import { useVoiceStore } from '../../stores/voice'
 
+const props = withDefaults(defineProps<{
+  cursorPosition?: { x: number, y: number }
+  enableOrbitControls?: boolean
+  paused?: boolean
+}>(), {
+  enableOrbitControls: true,
+  paused: false,
+})
+const emit = defineEmits<{
+  error: [error: Error]
+  /** The stage dropped a render error and starts a new load. */
+  reset: []
+  /** The active card has no model. The app opens the model settings. */
+  selectAvatarModel: []
+}>()
 const proactiveSpeechStore = useProactiveSpeechStore()
 const {
   isRunning: proactiveSpeechRunning,
@@ -86,22 +101,6 @@ onUnmounted(() => {
   }
 })
 
-const props = withDefaults(defineProps<{
-  cursorPosition?: { x: number, y: number }
-  enableOrbitControls?: boolean
-  paused?: boolean
-}>(), {
-  enableOrbitControls: true,
-  paused: false,
-})
-
-const emit = defineEmits<{
-  error: [error: Error]
-  /** The stage dropped a render error and starts a new load. */
-  reset: []
-  /** The active card has no model. The app opens the model settings. */
-  selectAvatarModel: []
-}>()
 const componentState = defineModel<'pending' | 'loading' | 'mounted'>('state', { default: 'pending' })
 
 // NOTICE: disabled together with the DuckDB start on mount below.
@@ -682,7 +681,6 @@ onUnmounted(() => {
   disconnectVoiceOutput()
   disconnectSpeakingGate()
   releaseSpeechPlayerRole()
-  speechAnalysis.disconnect()
   speechDestination.disconnect()
 })
 
