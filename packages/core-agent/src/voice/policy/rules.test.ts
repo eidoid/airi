@@ -196,6 +196,47 @@ describe('createSpeechActivityRule', () => {
     expect(harness.commands.at(-1)).toEqual({ type: 'cancel', inputId: 'input-1', reason: 'Speech segment was too short' })
   })
 
+  it('cancels its owned wake input when a discontinuity breaks the audio coordinates', async () => {
+    const harness = createHarness([create({ silenceMs: 1000 })] as VoiceRule<unknown>[])
+    harness.emit(speechActivitySignal, {
+      range: { sourceId: 'mic', startFrame: 0, endFrame: 32 },
+      durationMs: 32,
+      score: 0,
+      discontinuity: false,
+      accepted: true,
+      wake: { sessionId: 'alice', interruptTurns: [] },
+    })
+    await flush()
+    harness.emit(inputCapturingEvent, { inputId: 'input-1', from: { sourceId: 'mic', frame: 32 } })
+    harness.window(32, 32, 0)
+    harness.emit(speechActivitySignal, {
+      range: { sourceId: 'mic', startFrame: 96, endFrame: 128 },
+      durationMs: 32,
+      score: 0,
+      discontinuity: true,
+    })
+    await flush()
+
+    // A gap can reach the detector after the capture starts from the other side of it. The rule must release
+    // the active input, or every later wake for the session is rejected as already open.
+    expect(harness.commands.at(-1)).toEqual({ type: 'cancel', inputId: 'input-1', reason: 'Speech segment was too short' })
+
+    // ROOT CAUSE:
+    //
+    // A discontinuity cleared `owned` but left `active` set. The rule then ignored all later windows.
+    // We fixed this by ending the owned input and clearing both fields.
+    harness.emit(speechActivitySignal, {
+      range: { sourceId: 'mic', startFrame: 128, endFrame: 160 },
+      durationMs: 32,
+      score: 0,
+      discontinuity: false,
+      accepted: true,
+      wake: { sessionId: 'alice', interruptTurns: [] },
+    })
+    await flush()
+    expect(harness.commands.at(-1)).toMatchObject({ type: 'begin', input: { sessionId: 'alice', cause: 'wake-word' } })
+  })
+
   it('leaves a manual input alone', async () => {
     const harness = createHarness([create()] as VoiceRule<unknown>[])
     harness.emit(inputBegunEvent, { inputId: 'manual', sessionId: 'alice', start: { kind: 'after-silence' }, cause: 'control' })

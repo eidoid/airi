@@ -136,9 +136,28 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
         return { state }
 
       const { range, durationMs, score, discontinuity, accepted, wake } = event.body
-      // A gap ends the rule's claim on its input. The capture fails on the same gap.
-      const owned = discontinuity ? undefined : state.owned
       const active = state.active
+      // A gap ends the rule's claim on its input. End the input here because a capture that starts after the gap
+      // stays open, and an active input without an owner ignores every later window and wake.
+      if (discontinuity) {
+        const interrupted = state.owned
+        if (!interrupted)
+          return { state }
+
+        const command: VoiceCommand = interrupted.speechMs < (options.minSpeechMs ?? 300)
+          ? { type: 'cancel', inputId: interrupted.inputId, reason: 'Speech segment was too short' }
+          : { type: 'seal', inputId: interrupted.inputId }
+        return {
+          state: {
+            ...state,
+            active: active?.inputId === interrupted.inputId ? undefined : active,
+            owned: undefined,
+          },
+          commands: [command],
+        }
+      }
+
+      const owned = state.owned
       if (active && active.inputId !== owned?.inputId)
         return { state: { ...state, owned } }
 
