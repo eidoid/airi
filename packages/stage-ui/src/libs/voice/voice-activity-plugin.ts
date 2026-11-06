@@ -85,7 +85,11 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       // The echo gate can cost a model call, so it runs only for a window that can begin an input.
       const active = ctx.controls.activeInput()
       const paused = !!options.enabled && !options.enabled()
-      const canBegin = !paused && ((wake && wake.sessionId !== active?.sessionId) || (!active && score >= threshold))
+      const replaceAutomatic = !!wake
+        && wake.sessionId === active?.sessionId
+        && active.cause !== 'control'
+        && active.phase === 'capturing'
+      const canBegin = !paused && (!!wake || (!active && score >= threshold))
       const accepted = canBegin ? (options.acceptSpeech ? await options.acceptSpeech(window, ctx.signal) : true) : undefined
       ctx.signal.throwIfAborted()
       if (wake) {
@@ -93,12 +97,19 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
           const reason = options.pauseReason?.()
           options.onWakeDropped?.(reason ? `Automatic input is paused: ${reason}` : 'Automatic input is paused')
         }
-        else if (active && wake.sessionId === active.sessionId) {
-          options.onWakeDropped?.('An input is already open for this session')
-        }
         else if (accepted === false) {
           options.onWakeDropped?.('AIRI is speaking')
         }
+        else if (active && wake.sessionId === active.sessionId && active.cause === 'control') {
+          options.onWakeDropped?.('An input is already open for this session')
+        }
+      }
+      if (accepted === true && active && replaceAutomatic) {
+        // A repeated wake is an explicit retry. Replacing a captured automatic input also recovers when the rule
+        // lost its activity windows, without interrupting an input that a user control owns.
+        const result = active.cancel('Replaced by a new wake word')
+        if (result === 'denied')
+          options.onWakeDropped?.('The open input cannot be replaced')
       }
 
       scope.emit(speechActivitySignal, {

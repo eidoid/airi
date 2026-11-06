@@ -54,6 +54,61 @@ it('names the reason when a paused input drops a wake word', async () => {
   await controller.close()
 })
 
+it('replaces an open automatic input when its session hears the wake word again', async () => {
+  const frames = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => frames.stream }, { historyMs: 360 })
+  const attempts: SpeechInputAttempt[] = []
+  const onWakeDropped = vi.fn()
+  let wake = false
+  const detectWakeWord = vi.fn(async () => wake ? { sessionId: 'alice', interruptTurns: [] } : undefined)
+  const controller = new VoiceController({ audio, submit: vi.fn(), transcriber: () => ({
+    transcribe: request => new ReadableStream<TranscriptionEvent>({ async start() {
+      try {
+        for await (const _ of request.audio) {
+          // Keep the provider open until the input is cancelled.
+        }
+      }
+      catch {
+        // Input cancellation ends this drain.
+      }
+    } }),
+  }) })
+  controller.onInput(attempt => void attempts.push(attempt))
+  controller.use(createVoiceActivityPlugin({
+    detect: async () => 0,
+    target: () => undefined,
+    detectWakeWord,
+    acceptSpeech: async () => true,
+    onWakeDropped,
+    minSpeechMs: 32,
+    silenceMs: 1000,
+  }), { grants: ['input-control', 'cancel-input'] })
+  await Promise.resolve()
+  function push(startFrame: number) {
+    frames.write({ range: { sourceId: 'mic', startFrame, endFrame: startFrame + 32 }, sampleRate: 1000, channels: [new Float32Array(32)] })
+  }
+
+  wake = true
+  push(0)
+  await expect.poll(() => attempts.length).toBe(1)
+  await expect.poll(() => detectWakeWord.mock.calls.length).toBe(1)
+  wake = false
+  push(32)
+  await expect.poll(() => attempts[0]?.state.phase).toBe('capturing')
+  push(64)
+  await expect.poll(() => detectWakeWord.mock.calls.length).toBe(2)
+
+  wake = true
+  push(96)
+  await expect.poll(() => detectWakeWord.mock.calls.length).toBe(3)
+  await expect.poll(() => attempts[0].state.phase).toBe('settled')
+  await expect.poll(() => attempts.length).toBe(2)
+  expect(await attempts[0].done).toMatchObject({ status: 'cancelled', reason: 'Replaced by a new wake word' })
+  expect(controller.activeInput?.id).toBe(attempts[1].id)
+  expect(onWakeDropped).not.toHaveBeenCalled()
+  await controller.close()
+})
+
 it('uses ordered VAD signals to capture, stream transcription, and submit to the accepted session', async () => {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })

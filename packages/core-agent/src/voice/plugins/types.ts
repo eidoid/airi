@@ -3,7 +3,7 @@ import type { AudioRange, AudioWindow, Observer, WindowOptions } from '@proj-air
 
 import type { ConversationContext } from '../input/ports'
 import type { TranscriptEdit, WriteResult } from '../input/transcript'
-import type { BeginSpeechInput, SpeechInputAttemptOutcome, TranscriptDocument } from '../input/types'
+import type { BeginSpeechInput, SpeechInputAttemptOutcome, SpeechInputAttemptState, TranscriptDocument } from '../input/types'
 import type { Interruption } from '../interruption'
 import type { SpeechOutputEvent } from '../output/response'
 import type { InputRevisions, VoiceRule } from '../policy/types'
@@ -13,6 +13,9 @@ import type { TurnRef } from '../turn'
 export interface SpeechInputControl {
   readonly id: string
   readonly sessionId: string
+  /** What started the input. `control` marks a deliberate user control, not an automatic voice activity input. */
+  readonly cause: string | undefined
+  readonly phase: SpeechInputAttemptState['phase']
   end: () => { status: 'accepted', done: Promise<SpeechInputAttemptOutcome> } | { status: 'denied' }
   cancel: (reason: string) => 'cancelled' | 'closed' | 'denied'
 }

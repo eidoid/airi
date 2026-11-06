@@ -111,6 +111,8 @@ class PluginInstallation<TNode> implements VoicePluginHandle {
     return {
       id: attempt.id,
       sessionId: attempt.sessionId,
+      cause: attempt.cause,
+      phase: attempt.state.phase,
       end: () => allows('input-control') ? { status: 'accepted', done: attempt.end() } : { status: 'denied' },
       cancel: reason => allows('cancel-input') ? this.actions.cancelInput(attempt.id, reason) : 'denied',
     }
