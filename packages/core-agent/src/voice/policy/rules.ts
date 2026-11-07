@@ -135,7 +135,7 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
       if (!isEvent(event, speechActivitySignal))
         return { state }
 
-      const { range, durationMs, score, discontinuity, accepted, wake } = event.body
+      const { range, durationMs, score, discontinuity, accepted, wake, replaceActive } = event.body
       const active = state.active
       // A gap ends the rule's claim on its input. End the input here because a capture that starts after the gap
       // stays open, and an active input without an owner ignores every later window and wake.
@@ -158,6 +158,25 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
       }
 
       const owned = state.owned
+      const threshold = options.threshold ?? 0.6
+      const speech = score >= (owned ? threshold * 0.3 : threshold)
+      if (replaceActive && wake && accepted) {
+        const input: BeginSpeechInput = {
+          sessionId: wake.sessionId,
+          interruptTurns: wake.interruptTurns,
+          cause: 'wake-word',
+          start: { kind: 'after-silence' },
+        }
+        return {
+          state: {
+            ...state,
+            active: undefined,
+            owned: undefined,
+            beginning: { cause: 'wake-word', firstWindow: { speech, durationMs, range } },
+          },
+          commands: [{ type: 'begin', input }],
+        }
+      }
       if (active && active.inputId !== owned?.inputId)
         return { state: { ...state, owned } }
 
@@ -166,8 +185,6 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
         return { state: { ...state, owned: undefined }, commands }
       }
 
-      const threshold = options.threshold ?? 0.6
-      const speech = score >= (owned ? threshold * 0.3 : threshold)
       if ((wake && wake.sessionId !== owned?.sessionId) || (!owned && speech)) {
         if (!accepted)
           return { state: { ...state, owned } }

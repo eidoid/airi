@@ -237,6 +237,30 @@ describe('createSpeechActivityRule', () => {
     expect(harness.commands.at(-1)).toMatchObject({ type: 'begin', input: { sessionId: 'alice', cause: 'wake-word' } })
   })
 
+  it('replaces an active input that lost ownership when a wake requests it', async () => {
+    const harness = createHarness([create({ silenceMs: 64 })] as VoiceRule<unknown>[])
+    harness.emit(inputBegunEvent, { inputId: 'stuck', sessionId: 'alice', start: { kind: 'after-silence' }, cause: 'wake-word' })
+    await flush()
+
+    harness.emit(speechActivitySignal, {
+      range: { sourceId: 'mic', startFrame: 0, endFrame: 32 },
+      durationMs: 32,
+      score: 0,
+      discontinuity: false,
+      accepted: true,
+      wake: { sessionId: 'alice', interruptTurns: [] },
+      replaceActive: true,
+    })
+    await flush()
+    expect(harness.commands.at(-1)).toMatchObject({ type: 'begin', input: { sessionId: 'alice', cause: 'wake-word' } })
+
+    harness.emit(inputCapturingEvent, { inputId: 'input-1', from: { sourceId: 'mic', frame: 32 } })
+    harness.window(32, 32, 0)
+    harness.window(64, 32, 0)
+    await flush()
+    expect(harness.commands.at(-1)).toEqual({ type: 'cancel', inputId: 'input-1', reason: 'Speech segment was too short' })
+  })
+
   it('leaves a manual input alone', async () => {
     const harness = createHarness([create()] as VoiceRule<unknown>[])
     harness.emit(inputBegunEvent, { inputId: 'manual', sessionId: 'alice', start: { kind: 'after-silence' }, cause: 'control' })

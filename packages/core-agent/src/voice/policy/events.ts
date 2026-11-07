@@ -26,6 +26,8 @@ export const speechActivitySignal = defineEventa<{
   /** The echo gate result. The detector evaluates it only for a window that can begin an input. */
   accepted?: boolean
   wake?: { sessionId: string, interruptTurns: readonly TurnRef[] }
+  /** The wake replaces an open automatic input, even when the activity rule lost that input's windows. */
+  replaceActive?: boolean
 }>('proj-airi:voice:signal:speech-activity')
 
 /** One VAD window that the activity rule accepted for its input. Its revision changes when speech starts or stops. */

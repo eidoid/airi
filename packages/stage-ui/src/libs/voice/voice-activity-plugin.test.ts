@@ -60,6 +60,7 @@ it('replaces an open automatic input when its session hears the wake word again'
   const attempts: SpeechInputAttempt[] = []
   const onWakeDropped = vi.fn()
   let wake = false
+  let silenceMs = 1000
   const detectWakeWord = vi.fn(async () => wake ? { sessionId: 'alice', interruptTurns: [] } : undefined)
   const controller = new VoiceController({ audio, submit: vi.fn(), transcriber: () => ({
     transcribe: request => new ReadableStream<TranscriptionEvent>({ async start() {
@@ -81,7 +82,7 @@ it('replaces an open automatic input when its session hears the wake word again'
     acceptSpeech: async () => true,
     onWakeDropped,
     minSpeechMs: 32,
-    silenceMs: 1000,
+    silenceMs: () => silenceMs,
   }), { grants: ['input-control', 'cancel-input'] })
   await Promise.resolve()
   function push(startFrame: number) {
@@ -103,9 +104,19 @@ it('replaces an open automatic input when its session hears the wake word again'
   await expect.poll(() => detectWakeWord.mock.calls.length).toBe(3)
   await expect.poll(() => attempts[0].state.phase).toBe('settled')
   await expect.poll(() => attempts.length).toBe(2)
-  expect(await attempts[0].done).toMatchObject({ status: 'cancelled', reason: 'Replaced by a new wake word' })
+  wake = false
+  expect(await attempts[0].done).toMatchObject({ status: 'cancelled', reason: 'Replaced by a new input' })
   expect(controller.activeInput?.id).toBe(attempts[1].id)
   expect(onWakeDropped).not.toHaveBeenCalled()
+
+  push(128)
+  await expect.poll(() => attempts[1].state.phase).toBe('capturing')
+  silenceMs = 64
+  push(160)
+  push(192)
+  push(224)
+  await expect.poll(() => attempts[1].state.phase).toBe('settled')
+  expect(await attempts[1].done).toMatchObject({ status: 'cancelled', reason: 'Speech segment was too short' })
   await controller.close()
 })
 

@@ -85,7 +85,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
       // The echo gate can cost a model call, so it runs only for a window that can begin an input.
       const active = ctx.controls.activeInput()
       const paused = !!options.enabled && !options.enabled()
-      const replaceAutomatic = !!wake
+      const replaceActive = !!wake
         && wake.sessionId === active?.sessionId
         && active.cause !== 'control'
         && active.phase === 'capturing'
@@ -104,14 +104,6 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
           options.onWakeDropped?.('An input is already open for this session')
         }
       }
-      if (accepted === true && active && replaceAutomatic) {
-        // A repeated wake is an explicit retry. Replacing a captured automatic input also recovers when the rule
-        // lost its activity windows, without interrupting an input that a user control owns.
-        const result = active.cancel('Replaced by a new wake word')
-        if (result === 'denied')
-          options.onWakeDropped?.('The open input cannot be replaced')
-      }
-
       scope.emit(speechActivitySignal, {
         range: window.range,
         durationMs,
@@ -119,6 +111,7 @@ export function createVoiceActivityPlugin(options: VoiceActivityOptions): VoiceP
         discontinuity: window.discontinuity,
         ...(accepted === undefined ? {} : { accepted }),
         ...(wake ? { wake } : {}),
+        ...(replaceActive ? { replaceActive } : {}),
       })
     })
 
