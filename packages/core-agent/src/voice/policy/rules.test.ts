@@ -148,6 +148,28 @@ describe('createSpeechActivityRule', () => {
     expect(harness.seen.map(event => (event.body as { range: { startFrame: number } }).range.startFrame)).toEqual([32, 64])
   })
 
+  it('counts the first wake window when the capture starts between window boundaries', async () => {
+    const harness = createHarness([create({ silenceMs: 64 })] as VoiceRule<unknown>[])
+    harness.emit(speechActivitySignal, {
+      range: { sourceId: 'mic', startFrame: 0, endFrame: 32 },
+      durationMs: 32,
+      score: 0,
+      discontinuity: false,
+      accepted: true,
+      wake: { sessionId: 'alice', interruptTurns: [] },
+    })
+    await flush()
+
+    // The capture starts after frame 21, inside the gap before the next 32 ms VAD window.
+    harness.emit(inputCapturingEvent, { inputId: 'input-1', from: { sourceId: 'mic', frame: 21 } })
+    harness.window(32, 32, 0)
+    harness.window(64, 32, 0)
+    await flush()
+
+    expect(harness.commands.at(-1)).toEqual({ type: 'cancel', inputId: 'input-1', reason: 'Speech segment was too short' })
+    expect(harness.seen.map(event => (event.body as { range: { startFrame: number } }).range.startFrame)).toEqual([32, 64])
+  })
+
   // Codex review on PR #2995: the Hearing playground changes its sensitivity and silence sliders while it monitors.
   it('reads a live threshold and silence limit on each window', async () => {
     const settings = { threshold: 0.95, silenceMs: 1000 }

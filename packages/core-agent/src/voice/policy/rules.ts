@@ -122,8 +122,9 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
         const active = { ...state.active, from: event.body.from }
         if (!state.owned || state.owned.activityEnd !== undefined)
           return { state: { ...state, active } }
-        // The first frame is known now. Count the windows that arrived before it.
-        const counted = count({ ...state.owned, activityEnd: event.body.from.frame, waiting: [] }, event.body.from, state.owned.waiting)
+        // The first frame is known now. Count the windows that arrived before it. Leave `activityEnd` undefined
+        // until one window counts, because a wake capture can start between VAD window boundaries.
+        const counted = count({ ...state.owned, waiting: [] }, event.body.from, state.owned.waiting)
         return { state: { ...state, active, owned: counted.owned }, emit: counted.emit, commands: counted.commands }
       }
       // A finalizing input no longer accepts audio, and the controller can begin the next input.
@@ -220,10 +221,11 @@ export function createSpeechActivityRule(options: SpeechActivityRuleOptions): Vo
     const emit: Emission[] = []
     let owned = start
     for (const { range, durationMs, speech } of windows) {
-      const activityEnd = owned.activityEnd ?? from.frame
-      // A window counts when it is inside the input and continues the last counted window without a gap.
-      const inside = range.sourceId === from.sourceId && range.startFrame >= from.frame
-      if (!inside || range.endFrame <= activityEnd || range.startFrame > activityEnd)
+      const activityEnd = owned.activityEnd
+      // The first window only needs to cover the capture start. Later windows must continue the last counted window.
+      const inside = range.sourceId === from.sourceId && range.endFrame > from.frame
+      const continued = activityEnd === undefined || (range.startFrame <= activityEnd && range.endFrame > activityEnd)
+      if (!inside || !continued)
         continue
 
       emit.push(emission(inputActivitySignal, { inputId: owned.inputId, range, speech, durationMs }))
