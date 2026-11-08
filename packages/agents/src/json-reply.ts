@@ -10,7 +10,7 @@
  */
 export function readJsonReply(reply: string): unknown {
   const withoutThinking = reply.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
-  const fenced = withoutThinking.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const fenced = withoutThinking.match(/```(?:json)?([\s\S]*?)```/i)
   const candidate = (fenced?.[1] ?? withoutThinking).trim()
   const objectStart = candidate.indexOf('{')
   const arrayStart = candidate.indexOf('[')

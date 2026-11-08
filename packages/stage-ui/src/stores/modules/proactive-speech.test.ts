@@ -1,6 +1,5 @@
-import type { Ref } from 'vue'
-
 import type { ChatHistoryItem } from '@proj-airi/core-agent'
+import type { Ref } from 'vue'
 
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -70,7 +69,9 @@ vi.mock('../chat/session-store', async () => {
 vi.mock('@proj-airi/stage-shared/composables', () => ({
   useLocalStorageManualReset: <T>(_key: string, initial: T) => {
     const value = shallowRef(initial) as unknown as { value: T, reset: () => void }
-    value.reset = () => { value.value = initial }
+    value.reset = () => {
+      value.value = initial
+    }
     return value
   },
 }))

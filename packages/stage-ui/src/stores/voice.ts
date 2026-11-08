@@ -7,8 +7,9 @@ import type { ChatToolReference } from '../types/chat'
 
 import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
-import { turnKey } from '@proj-airi/core-agent'
+import { DEFAULT_SPEECH_THRESHOLD, turnKey } from '@proj-airi/core-agent'
 import { observeLevel } from '@proj-airi/pipelines-audio'
+import { VoiceIdKeys } from '@proj-airi/trace-kit/voice'
 import { defineStore, storeToRefs } from 'pinia'
 import { onScopeDispose, ref, shallowRef, watch } from 'vue'
 
@@ -104,9 +105,10 @@ export const useVoiceStore = defineStore('voice', () => {
   const composerInputs = new Map<string, string | undefined>()
   let presentedInput: { requestId: string, attempt: SpeechInputAttempt, trigger: VoiceInputTrigger } | undefined
 
-  const inputTracer = createVoiceInputTracer()
+  const inputTracer = createVoiceInputTracer({ speechThreshold: DEFAULT_SPEECH_THRESHOLD })
   const { controller, state, snapshot: transcript, error } = useVoiceController({
-    transcriber: () => hearing.createTranscriber(),
+    // The recognition span belongs to its input, which can still finalize after the next input began.
+    transcriber: ({ inputId, sessionId }) => hearing.createTranscriber(undefined, { ids: { [VoiceIdKeys.Input]: inputId, [VoiceIdKeys.Conversation]: sessionId } }),
     speech: (turn) => {
       if (!output)
         throw new Error('Voice output host is not connected')
@@ -589,6 +591,8 @@ export const useVoiceStore = defineStore('voice', () => {
       },
     })
     const plugin = createVoiceActivityPlugin({
+      // The input tracer records the same threshold, so the trace draws the score that begins speech.
+      threshold: DEFAULT_SPEECH_THRESHOLD,
       detect: async (window, signal) => {
         const probability = await model.score(window, signal)
         inputTracer.window(window.channels, probability)

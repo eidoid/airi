@@ -37,7 +37,7 @@ interface Emits {
   interactionChange: [active: boolean]
 }
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   /**
    * The cursor is away from the stage window, so the Island hides. The stage
    * page owns the cursor signals and decides this.
